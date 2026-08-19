@@ -3,9 +3,9 @@ import { CONFIG, loadMapping, saveMapping, loadChangeLog, saveChangeLog, redirec
 import { initAuth, getAccount, login, logout } from './auth.js';
 import { telemetry } from './graph.js';
 import { ctx, resolveAll, readListItems, readExcelViaWorkbook, readExcelViaDownload } from './sources.js';
-import { buildDiff, autoMap, resolveKeyColumns, nameKey } from './diff.js';
+import { buildDiff, autoMap, resolveKeyColumns, nameKey, normalize, display } from './diff.js';
 import { applyChanges } from './sync.js';
-import { renderSetup, renderDiff, renderChanges, renderBench, esc } from './ui.js';
+import { renderSetup, renderDiff, renderChanges, renderResult, renderBench, esc } from './ui.js';
 
 const state = {
   account: null,
@@ -30,6 +30,11 @@ const state = {
   applying: false,
   progress: { done: 0, total: 0 },
   lastApply: null,
+  lastAppliedRows: null,
+
+  // ④ 적용 결과 그리드
+  postApply: null,
+  resultScope: 'changed',
 
   changeLog: loadChangeLog(),
   readBench: null,
@@ -42,7 +47,7 @@ const $ = (sel) => document.querySelector(sel);
 // ------------------------------------------------------------------ 렌더
 
 function render() {
-  const map = { setup: renderSetup, diff: renderDiff, changes: renderChanges, bench: renderBench };
+  const map = { setup: renderSetup, diff: renderDiff, changes: renderChanges, result: renderResult, bench: renderBench };
   const err = state.error
     ? `<div class="alert err"><b>오류</b> — ${esc(state.error.message || state.error)}
        ${state.error.detail ? `<pre>${esc(String(state.error.detail).slice(0, 800))}</pre>` : ''}</div>`
@@ -54,6 +59,34 @@ function render() {
   $('#who').textContent = state.account ? `${state.account.name || ''} <${state.account.username}>` : '로그인 필요';
   $('#btn-login').hidden = !!state.account;
   $('#btn-logout').hidden = !state.account;
+
+  wireCompareSync();
+}
+
+/**
+ * 비교 그리드의 스크롤 동기화.
+ * - 세로: 키 열 + 전 패널 + 후 패널 3개를 함께 이동 (행이 항상 같은 줄에 놓이도록)
+ * - 가로: 전/후 두 패널만 함께 이동 (같은 컬럼을 나란히 두고 비교하도록)
+ * render() 가 innerHTML 을 갈아끼우므로 매 렌더마다 다시 연결한다.
+ */
+function wireCompareSync() {
+  const root = document.getElementById('cmp-grid');
+  if (!root) return;
+  const panes = [...root.querySelectorAll('.cmp-pane')];
+  const all = [root.querySelector('.cmp-key'), ...panes].filter(Boolean);
+  let lock = false;
+
+  for (const el of all) {
+    el.addEventListener('scroll', () => {
+      if (lock) return;
+      lock = true;
+      for (const other of all) if (other !== el) other.scrollTop = el.scrollTop;
+      if (panes.includes(el)) for (const p of panes) if (p !== el) p.scrollLeft = el.scrollLeft;
+      requestAnimationFrame(() => {
+        lock = false;
+      });
+    });
+  }
 }
 
 /** 체크박스/옵션 변경 시 전체 재렌더 없이 툴바만 갱신 (details 열림 상태 보존) */
@@ -200,6 +233,14 @@ async function actApply() {
     };
     state.changeLog = [entry, ...state.changeLog];
     saveChangeLog(state.changeLog);
+    state.lastAppliedRows = rows;
+
+    // 실제로 쓴 경우에만 SharePoint 를 다시 읽어 반영 결과를 검증한다.
+    if (!result.dryRun && result.okCount) {
+      state.postApply = await buildPostApply(rows, result);
+      state.resultScope = 'changed';
+      state.tab = 'result';
+    }
   } catch (e) {
     console.error(e);
     state.error = e;
@@ -207,6 +248,70 @@ async function actApply() {
     state.applying = false;
     render();
   }
+}
+
+/**
+ * 적용 직후 SharePoint 를 다시 읽어, 쓴 값이 실제로 반영됐는지 셀 단위로 대조한다.
+ * 반영 확인(ok) / 기대값 불일치(ng) 를 표시해 타입 변환 문제를 드러낸다.
+ */
+async function buildPostApply(appliedRows, result) {
+  const list = await readListItems(mappedFieldNames());
+
+  const colOf = (name) => ctx.columns.find((c) => c.name === name);
+  const keyCol = colOf(state.mapping.keyList) || { type: 'text' };
+  const cols = state.mapping.pairs
+    .filter((p) => p.excel && p.list)
+    .map((p) => ({ field: p.list, label: colOf(p.list)?.displayName || p.list, col: colOf(p.list) }));
+
+  // 이번에 쓰기 성공한 항목의 기대값 (키 정규화 기준)
+  const intendedByKey = new Map();
+  for (const r of result.results.filter((x) => x.ok)) {
+    const src = appliedRows.find((x) => x.key === r.key);
+    if (src) intendedByKey.set(r.key, new Map(src.diffCells.map((c) => [c.field, c])));
+  }
+
+  let okCells = 0;
+  let ngCells = 0;
+
+  const rows = list.items.map((it) => {
+    const nkey = normalize(it.fields[state.mapping.keyList], keyCol);
+    const intended = intendedByKey.get(nkey);
+    const values = {};
+    const marks = {};
+    const intendedText = {};
+
+    for (const c of cols) {
+      const raw = it.fields[c.field];
+      values[c.field] = display(raw, c.col);
+      const want = intended?.get(c.field);
+      if (!want) continue;
+      const match = normalize(raw, c.col) === normalize(want.after, c.col);
+      marks[c.field] = match ? 'ok' : 'ng';
+      intendedText[c.field] = want.afterText;
+      match ? okCells++ : ngCells++;
+    }
+
+    return {
+      key: display(it.fields[state.mapping.keyList], keyCol),
+      itemId: it.id,
+      changed: !!intended,
+      values,
+      marks,
+      intended: intendedText,
+    };
+  });
+
+  rows.sort((a, b) => Number(b.changed) - Number(a.changed)); // 변경분을 위로
+
+  return {
+    at: new Date().toLocaleString('ko-KR'),
+    readMs: list.ms,
+    cols: cols.map(({ field, label }) => ({ field, label })),
+    rows,
+    appliedCount: intendedByKey.size,
+    okCells,
+    ngCells,
+  };
 }
 
 async function actReadBench() {
@@ -293,6 +398,12 @@ view.addEventListener('click', (e) => {
       state.selected.clear();
       return syncToolbar();
 
+    case 'refresh-result':
+      if (!state.lastAppliedRows || !state.lastApply) return;
+      return guard('적용 결과 재조회 중', async () => {
+        state.postApply = await buildPostApply(state.lastAppliedRows, state.lastApply);
+      });
+
     case 'export-csv':
       return exportCsv();
     case 'clear-log':
@@ -347,6 +458,10 @@ view.addEventListener('change', (e) => {
     case 'dry-run':
       state.writeOpts.dryRun = el.checked;
       return syncToolbar();
+
+    case 'result-scope':
+      state.resultScope = el.value;
+      return render();
   }
 });
 

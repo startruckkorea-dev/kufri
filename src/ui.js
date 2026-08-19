@@ -14,6 +14,9 @@ const stat = (label, value, cls = '') => `
 
 const alert = (kind, html) => `<div class="alert ${kind}">${html}</div>`;
 
+/** 그리드 한 칸의 표시 폭 (전/후 두 패널의 열이 정확히 겹치도록 고정) */
+const COL_W = 160;
+
 // ------------------------------------------------------------------ ① 연결 · 매핑
 
 export function renderSetup(s) {
@@ -116,7 +119,7 @@ export function renderSetup(s) {
       <div class="row mt">
         <button class="btn" data-act="pair-add">행 추가</button>
         <button class="btn" data-act="automap">이름으로 자동 매핑</button>
-        <div class="spacer" style="flex:1"></div>
+        <div style="flex:1"></div>
         <button class="btn primary" data-act="run-diff"
           ${s.busy || !s.mapping.keyExcel || !s.mapping.keyList || !s.mapping.pairs.some((p) => p.excel && p.list) ? 'disabled' : ''}>
           데이터 읽기 &amp; 비교 실행
@@ -138,45 +141,6 @@ export function renderDiff(s) {
     warn.push(`Excel 에 중복 키 ${d.warnings.dupExcelKeys.length}건 (첫 행만 사용): <span class="mono">${esc(d.warnings.dupExcelKeys.slice(0, 5).join(', '))}</span>`);
   if (d.warnings.dupListKeys.length)
     warn.push(`List 에 중복 키 ${d.warnings.dupListKeys.length}건 (첫 항목만 갱신): <span class="mono">${esc(d.warnings.dupListKeys.slice(0, 5).join(', '))}</span>`);
-
-  const rows = d.changed
-    .map((r) => {
-      const checked = s.selected.has(r.key) ? 'checked' : '';
-      const body = r.cells
-        .map(
-          (c) => `
-        <tr class="${c.changed ? 'changed' : 'same'}">
-          <td class="nowrap">${esc(c.label)}<br /><span class="muted mono" style="font-size:11px">${esc(c.excelHeader)}</span></td>
-          <td class="before">${esc(c.beforeText)}</td>
-          <td class="after">${esc(c.afterText)}</td>
-          <td>${c.changed ? '<span class="badge warn">변경</span>' : ''}</td>
-        </tr>`
-        )
-        .join('');
-      return `
-      <div class="diff-row">
-      <input type="checkbox" class="diff-check" data-act="sel" data-key="${esc(r.key)}" ${checked} />
-      <details class="diff">
-        <summary>
-          <span class="key">${esc(r.key)}</span>
-          <span class="badge warn">${r.diffCells.length}개 필드 변경</span>
-          <span class="meta">List item #${esc(r.itemId)} · Excel ${r.excelRow}행</span>
-        </summary>
-        <div class="diff-body scroll-x">
-          <table>
-            <thead><tr>
-              <th style="width:22%">필드</th>
-              <th class="col-before" style="width:34%">전 (SharePoint 현재값)</th>
-              <th class="col-after" style="width:34%">후 (Excel 적용값)</th>
-              <th style="width:70px"></th>
-            </tr></thead>
-            <tbody>${body}</tbody>
-          </table>
-        </div>
-      </details>
-      </div>`;
-    })
-    .join('');
 
   const selCount = d.changed.filter((r) => s.selected.has(r.key)).length;
 
@@ -222,10 +186,7 @@ export function renderDiff(s) {
       ${s.lastApply ? renderApplyResult(s.lastApply) : ''}
     </div>
 
-    <div class="card">
-      <h2>변경 상세 <span class="sub">전 / 후</span></h2>
-      ${rows || `<div class="empty">차이가 없습니다. 두 소스가 동일합니다.</div>`}
-    </div>`;
+    ${renderCompareCard(s)}`;
 }
 
 /** 이번 비교에 실제로 걸린 읽기 시간 (부가 측정치) */
@@ -247,6 +208,85 @@ function renderApplyResult(a) {
       · ${ms(a.wallMs)} · <b>${n2(a.itemsPerSec)} 건/초</b> · 건당 ${n2(a.msPerItem)} ms
       · 배치 ${a.batchCount}개(크기 ${a.batchSize}, 동시 ${a.concurrency})${a.throttled ? ` · <b>429 스로틀 ${a.throttled}회</b>` : ''}
       ${a.failCount ? `<pre>${esc(a.results.filter((r) => !r.ok).slice(0, 5).map((r) => `${r.key}: HTTP ${r.status} ${r.error}`).join('\n'))}</pre>` : ''}
+    </div>`;
+}
+
+/**
+ * 좌우 분할 비교 그리드.
+ * 왼쪽 고정열 = 키(Commission no.), 가운데 = 전(SharePoint 현재값), 오른쪽 = 후(Excel 적용값).
+ * 세 영역의 세로 스크롤과 두 패널의 가로 스크롤은 JS 로 동기화된다 (main.js wireCompareSync).
+ */
+function renderCompareCard(s) {
+  const d = s.diff;
+  if (!d.changed.length)
+    return `<div class="card"><h2>변경 상세</h2><div class="empty">차이가 없습니다. 두 소스가 동일합니다.</div></div>`;
+
+  const shown = d.changed;
+  const cols = d.changed[0].cells.map((c) => ({ field: c.field, label: c.label, excelHeader: c.excelHeader }));
+  const tableW = cols.length * COL_W;
+
+  const headHtml = (title, cls) => `
+    <thead>
+      <tr><th class="grp ${cls}" colspan="${cols.length}">${title}</th></tr>
+      <tr>${cols.map((c) => `<th title="${esc(c.excelHeader)}">${esc(c.label)}</th>`).join('')}</tr>
+    </thead>`;
+
+  const bodyHtml = (side) =>
+    shown
+      .map((r) => {
+        const byField = new Map(r.cells.map((c) => [c.field, c]));
+        return `<tr>${cols
+          .map((col) => {
+            const c = byField.get(col.field);
+            const text = side === 'before' ? c?.beforeText : c?.afterText;
+            const cls = !c?.changed ? '' : side === 'before' ? 'chg-src' : 'chg-new';
+            return `<td class="${cls}" title="${esc(text)}">${esc(text)}</td>`;
+          })
+          .join('')}</tr>`;
+      })
+      .join('');
+
+  const keyRows = shown
+    .map(
+      (r) => `
+      <tr>
+        <td class="chk"><input type="checkbox" data-act="sel" data-key="${esc(r.key)}" ${s.selected.has(r.key) ? 'checked' : ''} /></td>
+        <td class="mono" title="${esc(r.key)}">${esc(r.key)}</td>
+        <td class="num"><span class="badge warn">${r.diffCells.length}</span></td>
+      </tr>`
+    )
+    .join('');
+
+  return `
+    <div class="card">
+      <h2>변경 상세 <span class="sub">왼쪽 = 전(SharePoint 현재값) · 오른쪽 = 후(Excel 적용값) · 빨간색이 변경 예정</span></h2>
+      <div class="cmp" id="cmp-grid" style="--col-w:${COL_W}px">
+        <div class="cmp-key">
+          <table class="grid">
+            <colgroup><col style="width:34px" /><col /><col style="width:44px" /></colgroup>
+            <thead>
+              <tr><th class="grp" colspan="3">&nbsp;</th></tr>
+              <tr><th class="chk"></th><th>${esc(CONFIG.keyColumn)}</th><th class="num" title="변경 필드 수">Δ</th></tr>
+            </thead>
+            <tbody>${keyRows}</tbody>
+          </table>
+        </div>
+        <div class="cmp-pane" data-sync>
+          <table class="grid" style="width:${tableW}px">
+            <colgroup>${cols.map(() => `<col style="width:${COL_W}px" />`).join('')}</colgroup>
+            ${headHtml('전 — SharePoint 현재값', 'before')}
+            <tbody>${bodyHtml('before')}</tbody>
+          </table>
+        </div>
+        <div class="cmp-pane" data-sync>
+          <table class="grid" style="width:${tableW}px">
+            <colgroup>${cols.map(() => `<col style="width:${COL_W}px" />`).join('')}</colgroup>
+            ${headHtml('후 — Excel 적용값', 'after')}
+            <tbody>${bodyHtml('after')}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="row mt"><span class="muted">변경 행 ${shown.length}건 전체 표시</span></div>
     </div>`;
 }
 
@@ -301,7 +341,80 @@ export function renderChanges(s) {
     <div class="card">${entries}</div>`;
 }
 
-// ------------------------------------------------------------------ ④ 벤치마크
+// ------------------------------------------------------------------ ④ 적용 결과 (변경된 리스트 그리드)
+
+export function renderResult(s) {
+  const p = s.postApply;
+  if (!p)
+    return `<div class="card"><div class="empty">
+      아직 적용 결과가 없습니다.<br />
+      <span class="muted">② 비교 에서 <b>드라이런을 해제하고</b> 적용하면, SharePoint 를 다시 읽어 실제 반영된 값을 여기에 그리드로 보여줍니다.</span>
+    </div></div>`;
+
+  const scope = s.resultScope;
+  const shown = scope === 'changed' ? p.rows.filter((r) => r.changed) : p.rows;
+
+  const body = shown
+    .map(
+      (r) => `
+      <tr class="${r.changed ? 'is-changed' : ''}">
+        <td class="stick mono" title="${esc(r.key)}">${r.changed ? '<span class="dot"></span>' : ''}${esc(r.key)}</td>
+        ${p.cols
+          .map((c) => {
+            const v = r.values[c.field];
+            const mark = r.marks[c.field]; // 'ok' | 'ng' | undefined
+            const title = mark === 'ng' ? `기대값: ${r.intended[c.field]}` : v;
+            return `<td class="${mark ? 'v-' + mark : ''}" title="${esc(title)}">${esc(v)}</td>`;
+          })
+          .join('')}
+      </tr>`
+    )
+    .join('');
+
+  return `
+    <div class="card">
+      <h2>적용 결과 <span class="sub">SharePoint 를 다시 읽은 실제 값 · ${esc(p.at)}</span></h2>
+      <div class="stats">
+        ${stat('적용 항목', p.appliedCount, 'hi')}
+        ${stat('반영 확인', p.okCells, 'good')}
+        ${stat('불일치', p.ngCells, p.ngCells ? 'bad' : '')}
+        ${stat('재조회 소요', ms(p.readMs))}
+        ${stat('전체 리스트', p.rows.length)}
+      </div>
+      ${
+        p.ngCells
+          ? alert('warn', `<b>${p.ngCells}개 셀이 기대값과 다릅니다.</b> 열 타입 변환(선택 열의 허용값, 날짜 형식 등)을 확인하세요. 셀에 마우스를 올리면 기대값이 표시됩니다.`)
+          : alert('info', '적용한 모든 셀이 SharePoint 에서 기대값 그대로 확인되었습니다.')
+      }
+      <div class="row mt">
+        <label class="field"><span>표시 범위</span>
+          <select data-act="result-scope">
+            <option value="changed" ${scope === 'changed' ? 'selected' : ''}>변경된 항목만 (${p.rows.filter((r) => r.changed).length})</option>
+            <option value="all" ${scope === 'all' ? 'selected' : ''}>전체 리스트 (${p.rows.length})</option>
+          </select>
+        </label>
+        <span class="muted">초록 = 반영 확인 · 빨강 = 기대값 불일치</span>
+        <div style="flex:1"></div>
+        <button class="btn" data-act="refresh-result" ${s.busy ? 'disabled' : ''}>다시 읽기</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="scroll result-scroll">
+        <table class="grid result" style="width:${(p.cols.length + 1) * COL_W}px">
+          <colgroup><col style="width:${COL_W}px" />${p.cols.map(() => `<col style="width:${COL_W}px" />`).join('')}</colgroup>
+          <thead><tr>
+            <th class="stick">${esc(CONFIG.keyColumn)}</th>
+            ${p.cols.map((c) => `<th>${esc(c.label)}</th>`).join('')}
+          </tr></thead>
+          <tbody>${body || `<tr><td colspan="${p.cols.length + 1}" class="empty">표시할 행이 없습니다.</td></tr>`}</tbody>
+        </table>
+      </div>
+      <div class="row mt"><span class="muted">${shown.length}건 전체 표시</span></div>
+    </div>`;
+}
+
+// ------------------------------------------------------------------ ⑤ 벤치마크
 
 export function renderBench(s) {
   const r = s.readBench;
@@ -353,6 +466,7 @@ export function renderBench(s) {
         <div class="scroll mt" style="max-height:260px"><table>
           <thead><tr><th>#</th><th class="num">건수</th><th class="num">소요</th><th class="num">건당</th></tr></thead>
           <tbody>${w.batchTimings
+            .slice()
             .sort((a, b) => a.index - b.index)
             .map((b) => `<tr><td>${b.index}</td><td class="num">${b.size}</td><td class="num">${ms(b.ms)}</td><td class="num">${n2(b.ms / b.size)} ms</td></tr>`)
             .join('')}</tbody>
@@ -385,5 +499,3 @@ export function renderBench(s) {
 
   return readCard + writeCard + callCard;
 }
-
-export { alert as alertBox };
