@@ -5,7 +5,8 @@ import { telemetry } from './graph.js';
 import { ctx, resolveAll, readListItems, readExcelViaWorkbook, readExcelViaDownload } from './sources.js';
 import { buildDiff, autoMap, resolveKeyColumns, nameKey, normalize, display } from './diff.js';
 import { applyChanges } from './sync.js';
-import { renderSetup, renderDiff, renderChanges, renderResult, renderBench, esc } from './ui.js';
+import { readItemVersions, buildRestorePlan, buildRestorePlanFromLog } from './restore.js';
+import { renderSetup, renderDiff, renderChanges, renderResult, renderRollback, renderBench, esc } from './ui.js';
 
 const state = {
   account: null,
@@ -36,6 +37,11 @@ const state = {
   postApply: null,
   resultScope: 'changed',
 
+  // ⑤ 롤백
+  rollbackEntryIdx: 0,
+  rollback: null,
+  rollbackResult: null,
+
   changeLog: loadChangeLog(),
   readBench: null,
   telemetry: telemetry.calls,
@@ -47,7 +53,14 @@ const $ = (sel) => document.querySelector(sel);
 // ------------------------------------------------------------------ 렌더
 
 function render() {
-  const map = { setup: renderSetup, diff: renderDiff, changes: renderChanges, result: renderResult, bench: renderBench };
+  const map = {
+    setup: renderSetup,
+    diff: renderDiff,
+    changes: renderChanges,
+    result: renderResult,
+    rollback: renderRollback,
+    bench: renderBench,
+  };
   const err = state.error
     ? `<div class="alert err"><b>오류</b> — ${esc(state.error.message || state.error)}
        ${state.error.detail ? `<pre>${esc(String(state.error.detail).slice(0, 800))}</pre>` : ''}</div>`
@@ -70,22 +83,22 @@ function render() {
  * render() 가 innerHTML 을 갈아끼우므로 매 렌더마다 다시 연결한다.
  */
 function wireCompareSync() {
-  const root = document.getElementById('cmp-grid');
-  if (!root) return;
-  const panes = [...root.querySelectorAll('.cmp-pane')];
-  const all = [root.querySelector('.cmp-key'), ...panes].filter(Boolean);
-  let lock = false;
+  for (const root of document.querySelectorAll('.cmp')) {
+    const panes = [...root.querySelectorAll('.cmp-pane')];
+    const all = [root.querySelector('.cmp-key'), ...panes].filter(Boolean);
+    let lock = false;
 
-  for (const el of all) {
-    el.addEventListener('scroll', () => {
-      if (lock) return;
-      lock = true;
-      for (const other of all) if (other !== el) other.scrollTop = el.scrollTop;
-      if (panes.includes(el)) for (const p of panes) if (p !== el) p.scrollLeft = el.scrollLeft;
-      requestAnimationFrame(() => {
-        lock = false;
+    for (const el of all) {
+      el.addEventListener('scroll', () => {
+        if (lock) return;
+        lock = true;
+        for (const other of all) if (other !== el) other.scrollTop = el.scrollTop;
+        if (panes.includes(el)) for (const p of panes) if (p !== el) p.scrollLeft = el.scrollLeft;
+        requestAnimationFrame(() => {
+          lock = false;
+        });
       });
-    });
+    }
   }
 }
 
@@ -210,29 +223,7 @@ async function actApply() {
     });
     state.lastApply = result;
 
-    const entry = {
-      at: new Date().toISOString(),
-      user: state.account?.username || '',
-      dryRun: result.dryRun,
-      okCount: result.okCount,
-      failCount: result.failCount,
-      wallMs: result.wallMs,
-      itemsPerSec: result.itemsPerSec,
-      batchSize: result.batchSize,
-      concurrency: result.concurrency,
-      items: result.results.map((r) => {
-        const src = rows.find((x) => x.key === r.key);
-        return {
-          key: r.key,
-          itemId: r.itemId,
-          ok: r.ok,
-          status: r.status,
-          cells: (src?.diffCells || []).map((c) => ({ label: c.label, before: c.beforeText, after: c.afterText })),
-        };
-      }),
-    };
-    state.changeLog = [entry, ...state.changeLog];
-    saveChangeLog(state.changeLog);
+    logApply(rows, result);
     state.lastAppliedRows = rows;
 
     // 실제로 쓴 경우에만 SharePoint 를 다시 읽어 반영 결과를 검증한다.
@@ -248,6 +239,106 @@ async function actApply() {
     state.applying = false;
     render();
   }
+}
+
+/** 적용 / 롤백 공통 이력 기록 */
+function logApply(rows, result, note = null) {
+  const entry = {
+    at: new Date().toISOString(),
+    user: state.account?.username || '',
+    note,
+    dryRun: result.dryRun,
+    okCount: result.okCount,
+    failCount: result.failCount,
+    wallMs: result.wallMs,
+    itemsPerSec: result.itemsPerSec,
+    batchSize: result.batchSize,
+    concurrency: result.concurrency,
+    items: result.results.map((r) => {
+      const src = rows.find((x) => x.key === r.key);
+      return {
+        key: r.key,
+        itemId: r.itemId,
+        ok: r.ok,
+        status: r.status,
+        // 롤백 행은 beforeText 대신 currentText 를 쓴다
+        cells: (src?.diffCells || []).map((c) => ({
+          label: c.label,
+          before: c.beforeText ?? c.currentText,
+          after: c.afterText,
+        })),
+      };
+    }),
+  };
+  state.changeLog = [entry, ...state.changeLog];
+  saveChangeLog(state.changeLog);
+}
+
+/** 롤백 대상 컬럼 — 매핑된 컬럼(키 제외) */
+function restoreCols() {
+  const colOf = (n) => ctx.columns.find((c) => c.name === n);
+  return state.mapping.pairs
+    .filter((p) => p.excel && p.list)
+    .map((p) => ({ field: p.list, label: colOf(p.list)?.displayName || p.list, col: colOf(p.list) }));
+}
+
+/** 버전 기록에서 복원 지점을 찾아 계획을 세운다. 여기서는 아직 아무것도 쓰지 않는다. */
+async function actRbPrepare() {
+  await guard('버전 기록 조회 중', async () => {
+    const entry = state.changeLog[state.rollbackEntryIdx];
+    if (!entry) throw new Error('선택한 적용 이력을 찾을 수 없습니다.');
+    if (entry.dryRun) throw new Error('드라이런은 실제로 쓰지 않았으므로 되돌릴 것이 없습니다.');
+
+    const cols = restoreCols();
+    const itemIds = entry.items.filter((i) => i.ok).map((i) => i.itemId);
+    const { versions, errors, ms } = await readItemVersions(itemIds, { concurrency: state.writeOpts.concurrency });
+
+    const usable = [...versions.values()].filter((v) => v.length >= 2).length;
+    let plan;
+    let source = 'version';
+
+    if (usable === 0) {
+      // 버전 관리가 꺼져 있거나 이전 버전이 없다 → 적용 이력의 '전' 값으로 대체
+      const list = await readListItems(mappedFieldNames());
+      plan = buildRestorePlanFromLog(entry, list.items, cols, state.mapping.keyList);
+      source = 'log';
+    } else {
+      plan = buildRestorePlan(entry, versions, cols, entry.user);
+    }
+
+    state.rollback = { plan, source, versionMs: ms, at: new Date().toLocaleString('ko-KR'), errors };
+    state.rollbackResult = null;
+  });
+}
+
+/** 복원 실행 — 일반 적용과 같은 $batch 경로를 타므로 쓰기 성능도 함께 측정된다. */
+async function actRbApply() {
+  const rows = state.rollback?.plan.rows.filter((r) => r.diffCells.length) || [];
+  if (!rows.length) return;
+  if (
+    !confirm(
+      `SharePoint 리스트 '${ctx.listTitle}' 의 ${rows.length}개 항목을 적용 이전 값으로 되돌립니다.\n` +
+        `이 복원 작업도 새 버전을 만듭니다 (원래 값이 사라지지는 않습니다).\n\n진행할까요?`
+    )
+  )
+    return;
+
+  await guard('복원 쓰기 중', async () => {
+    const result = await applyChanges(rows, {
+      batchSize: state.writeOpts.batchSize,
+      concurrency: state.writeOpts.concurrency,
+      dryRun: false,
+    });
+    state.rollbackResult = result;
+    logApply(rows, result, 'rollback');
+
+    // 복원 결과도 ④ 탭에서 셀 단위로 검증한다
+    state.lastApply = result;
+    state.lastAppliedRows = rows;
+    state.postApply = await buildPostApply(rows, result);
+    state.resultScope = 'changed';
+    state.tab = 'result';
+  });
 }
 
 /**
@@ -354,8 +445,17 @@ document.getElementById('tabs').addEventListener('click', (e) => {
   const b = e.target.closest('button[data-tab]');
   if (!b) return;
   state.tab = b.dataset.tab;
+  if (state.tab === 'rollback') ensureRollbackEntry();
   render();
 });
+
+/** 롤백 선택값이 드라이런/없는 항목을 가리키지 않도록 보정 */
+function ensureRollbackEntry() {
+  const cur = state.changeLog[state.rollbackEntryIdx];
+  if (cur && !cur.dryRun) return;
+  const idx = state.changeLog.findIndex((x) => !x.dryRun);
+  state.rollbackEntryIdx = idx >= 0 ? idx : 0;
+}
 
 $('#btn-login').addEventListener('click', () => login());
 $('#btn-logout').addEventListener('click', () => logout());
@@ -375,6 +475,10 @@ view.addEventListener('click', (e) => {
       return actApply();
     case 'run-read-bench':
       return actReadBench();
+    case 'rb-prepare':
+      return actRbPrepare();
+    case 'rb-apply':
+      return actRbApply();
 
     case 'pair-add':
       state.mapping.pairs.push({ excel: '', list: '' });
@@ -461,6 +565,12 @@ view.addEventListener('change', (e) => {
 
     case 'result-scope':
       state.resultScope = el.value;
+      return render();
+
+    case 'rb-entry':
+      state.rollbackEntryIdx = Number(el.value);
+      state.rollback = null;
+      state.rollbackResult = null;
       return render();
   }
 });

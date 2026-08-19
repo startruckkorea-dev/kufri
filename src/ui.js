@@ -212,81 +212,99 @@ function renderApplyResult(a) {
 }
 
 /**
- * 좌우 분할 비교 그리드.
- * 왼쪽 고정열 = 키(Commission no.), 가운데 = 전(SharePoint 현재값), 오른쪽 = 후(Excel 적용값).
- * 세 영역의 세로 스크롤과 두 패널의 가로 스크롤은 JS 로 동기화된다 (main.js wireCompareSync).
+ * 좌우 분할 그리드 (비교 탭과 롤백 탭이 공유).
+ * 왼쪽 고정열 = 키, 가운데 = 왼쪽 값, 오른쪽 = 오른쪽 값. 오른쪽의 달라지는 셀은 빨간색.
+ * 세 영역의 세로 스크롤과 두 패널의 가로 스크롤은 main.js 의 wireCompareSync 가 맞춘다.
+ *
+ * @param {object} o
+ * @param {Array}  o.cols  [{field, label, title}]
+ * @param {Array}  o.rows  [{key, badge, checked, selectable, cells:{field:{left,right,changed}}}]
  */
-function renderCompareCard(s) {
-  const d = s.diff;
-  if (!d.changed.length)
-    return `<div class="card"><h2>변경 상세</h2><div class="empty">차이가 없습니다. 두 소스가 동일합니다.</div></div>`;
-
-  const shown = d.changed;
-  const cols = d.changed[0].cells.map((c) => ({ field: c.field, label: c.label, excelHeader: c.excelHeader }));
+function splitGrid({ cols, rows, leftTitle, rightTitle, selectable = false }) {
   const tableW = cols.length * COL_W;
+  const colGroup = cols.map(() => `<col style="width:${COL_W}px" />`).join('');
 
-  const headHtml = (title, cls) => `
+  const head = (title, cls) => `
     <thead>
       <tr><th class="grp ${cls}" colspan="${cols.length}">${title}</th></tr>
-      <tr>${cols.map((c) => `<th title="${esc(c.excelHeader)}">${esc(c.label)}</th>`).join('')}</tr>
+      <tr>${cols.map((c) => `<th title="${esc(c.title || c.label)}">${esc(c.label)}</th>`).join('')}</tr>
     </thead>`;
 
-  const bodyHtml = (side) =>
-    shown
+  const body = (side) =>
+    rows
       .map((r) => {
-        const byField = new Map(r.cells.map((c) => [c.field, c]));
         return `<tr>${cols
           .map((col) => {
-            const c = byField.get(col.field);
-            const text = side === 'before' ? c?.beforeText : c?.afterText;
-            const cls = !c?.changed ? '' : side === 'before' ? 'chg-src' : 'chg-new';
+            const c = r.cells[col.field];
+            const text = c ? (side === 'left' ? c.left : c.right) : '';
+            const cls = !c?.changed ? '' : side === 'left' ? 'chg-src' : 'chg-new';
             return `<td class="${cls}" title="${esc(text)}">${esc(text)}</td>`;
           })
           .join('')}</tr>`;
       })
       .join('');
 
-  const keyRows = shown
+  const keyRows = rows
     .map(
       (r) => `
       <tr>
-        <td class="chk"><input type="checkbox" data-act="sel" data-key="${esc(r.key)}" ${s.selected.has(r.key) ? 'checked' : ''} /></td>
+        ${
+          selectable
+            ? `<td class="chk"><input type="checkbox" data-act="sel" data-key="${esc(r.key)}" ${r.checked ? 'checked' : ''} /></td>`
+            : ''
+        }
         <td class="mono" title="${esc(r.key)}">${esc(r.key)}</td>
-        <td class="num"><span class="badge warn">${r.diffCells.length}</span></td>
+        <td class="num">${r.badge ?? ''}</td>
       </tr>`
     )
     .join('');
 
+  const keyCols = (selectable ? '<col style="width:34px" />' : '') + '<col /><col style="width:52px" />';
+  const keySpan = selectable ? 3 : 2;
+
+  return `
+    <div class="cmp">
+      <div class="cmp-key">
+        <table class="grid">
+          <colgroup>${keyCols}</colgroup>
+          <thead>
+            <tr><th class="grp" colspan="${keySpan}">&nbsp;</th></tr>
+            <tr>${selectable ? '<th class="chk"></th>' : ''}<th>${esc(CONFIG.keyColumn)}</th><th class="num" title="바뀌는 필드 수">Δ</th></tr>
+          </thead>
+          <tbody>${keyRows}</tbody>
+        </table>
+      </div>
+      <div class="cmp-pane" data-sync>
+        <table class="grid" style="width:${tableW}px"><colgroup>${colGroup}</colgroup>
+          ${head(leftTitle, 'before')}<tbody>${body('left')}</tbody>
+        </table>
+      </div>
+      <div class="cmp-pane" data-sync>
+        <table class="grid" style="width:${tableW}px"><colgroup>${colGroup}</colgroup>
+          ${head(rightTitle, 'after')}<tbody>${body('right')}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function renderCompareCard(s) {
+  const d = s.diff;
+  if (!d.changed.length)
+    return `<div class="card"><h2>변경 상세</h2><div class="empty">차이가 없습니다. 두 소스가 동일합니다.</div></div>`;
+
+  const cols = d.changed[0].cells.map((c) => ({ field: c.field, label: c.label, title: c.excelHeader }));
+  const rows = d.changed.map((r) => ({
+    key: r.key,
+    checked: s.selected.has(r.key),
+    badge: `<span class="badge warn">${r.diffCells.length}</span>`,
+    cells: Object.fromEntries(r.cells.map((c) => [c.field, { left: c.beforeText, right: c.afterText, changed: c.changed }])),
+  }));
+
   return `
     <div class="card">
       <h2>변경 상세 <span class="sub">왼쪽 = 전(SharePoint 현재값) · 오른쪽 = 후(Excel 적용값) · 빨간색이 변경 예정</span></h2>
-      <div class="cmp" id="cmp-grid" style="--col-w:${COL_W}px">
-        <div class="cmp-key">
-          <table class="grid">
-            <colgroup><col style="width:34px" /><col /><col style="width:44px" /></colgroup>
-            <thead>
-              <tr><th class="grp" colspan="3">&nbsp;</th></tr>
-              <tr><th class="chk"></th><th>${esc(CONFIG.keyColumn)}</th><th class="num" title="변경 필드 수">Δ</th></tr>
-            </thead>
-            <tbody>${keyRows}</tbody>
-          </table>
-        </div>
-        <div class="cmp-pane" data-sync>
-          <table class="grid" style="width:${tableW}px">
-            <colgroup>${cols.map(() => `<col style="width:${COL_W}px" />`).join('')}</colgroup>
-            ${headHtml('전 — SharePoint 현재값', 'before')}
-            <tbody>${bodyHtml('before')}</tbody>
-          </table>
-        </div>
-        <div class="cmp-pane" data-sync>
-          <table class="grid" style="width:${tableW}px">
-            <colgroup>${cols.map(() => `<col style="width:${COL_W}px" />`).join('')}</colgroup>
-            ${headHtml('후 — Excel 적용값', 'after')}
-            <tbody>${bodyHtml('after')}</tbody>
-          </table>
-        </div>
-      </div>
-      <div class="row mt"><span class="muted">변경 행 ${shown.length}건 전체 표시</span></div>
+      ${splitGrid({ cols, rows, leftTitle: '전 — SharePoint 현재값', rightTitle: '후 — Excel 적용값', selectable: true })}
+      <div class="row mt"><span class="muted">변경 행 ${rows.length}건 전체 표시</span></div>
     </div>`;
 }
 
@@ -414,7 +432,129 @@ export function renderResult(s) {
     </div>`;
 }
 
-// ------------------------------------------------------------------ ⑤ 벤치마크
+// ------------------------------------------------------------------ ⑤ 롤백
+
+export function renderRollback(s) {
+  const applied = s.changeLog.map((e, i) => ({ e, i })).filter(({ e }) => !e.dryRun);
+
+  if (!s.connected)
+    return `<div class="card"><div class="empty">먼저 <b>① 연결 · 매핑</b> 에서 연결하세요.</div></div>`;
+  if (!applied.length)
+    return `<div class="card"><div class="empty">되돌릴 적용 이력이 없습니다.<br />
+      <span class="muted">드라이런은 실제로 쓰지 않았으므로 롤백 대상이 아닙니다.</span></div></div>`;
+
+  const picker = `
+    <div class="card">
+      <h2>롤백 <span class="sub">적용 이전 상태로 되돌리기</span></h2>
+      ${alert('info', `되돌릴 값은 <b>SharePoint 버전 기록</b>에서 읽습니다 — 실제 저장됐던 원본 값이라 표시 문자열을 역변환하는 것보다 정확합니다.
+        버전 기록이 없으면 적용 이력의 '전' 값으로 대체하며, 이 경우 날짜의 초 단위가 유실됩니다.`)}
+      <div class="row">
+        <label class="field"><span>되돌릴 적용</span>
+          <select data-act="rb-entry">
+            ${applied
+              .map(
+                ({ e, i }) =>
+                  `<option value="${i}" ${i === s.rollbackEntryIdx ? 'selected' : ''}>
+                    ${esc(new Date(e.at).toLocaleString('ko-KR'))} · ${e.okCount}건 · ${esc(e.user)}
+                  </option>`
+              )
+              .join('')}
+          </select>
+        </label>
+        <button class="btn primary" data-act="rb-prepare" ${s.busy ? 'disabled' : ''}>복원 지점 조회</button>
+        <span class="muted">아직 아무것도 쓰지 않습니다. 조회 후 미리보기를 확인하세요.</span>
+      </div>
+    </div>`;
+
+  if (!s.rollback) return picker;
+
+  const { plan, source, versionMs, at, errors } = s.rollback;
+  const u = plan.summary;
+  const w = plan.warnings;
+
+  const warnHtml = [];
+  if (source === 'log')
+    warnHtml.push(
+      `<b>버전 기록을 쓸 수 없어 적용 이력 기반으로 계획을 세웠습니다.</b> 날짜 컬럼은 초 단위가 0으로 복원됩니다.`
+    );
+  if (w.noVersion?.length)
+    warnHtml.push(`이전 버전이 없어 건너뛴 항목 ${w.noVersion.length}건: <span class="mono">${esc(w.noVersion.slice(0, 5).join(', '))}</span>
+      <br /><span class="muted">리스트의 버전 관리가 꺼져 있거나, 해당 항목의 첫 버전입니다.</span>`);
+  if (w.foreignEdit?.length)
+    warnHtml.push(`<b>적용 이후 다른 계정이 수정한 항목 ${w.foreignEdit.length}건</b>: <span class="mono">${esc(w.foreignEdit.slice(0, 5).join(', '))}</span>
+      <br /><span class="muted">되돌리면 그 수정까지 함께 사라집니다. 아래 미리보기에서 반드시 확인하세요.</span>`);
+  if (w.missing?.length)
+    warnHtml.push(`리스트에서 찾지 못한 항목 ${w.missing.length}건: <span class="mono">${esc(w.missing.slice(0, 5).join(', '))}</span>`);
+  if (errors?.length)
+    warnHtml.push(`버전 조회에 실패한 항목 ${errors.length}건: <pre>${esc(errors.slice(0, 3).map((e) => `#${e.itemId} HTTP ${e.status} ${e.error}`).join('\n'))}</pre>`);
+
+  const target = plan.rows.filter((r) => r.diffCells.length);
+  const cols = plan.rows[0]?.cells.map((c) => ({ field: c.field, label: c.label })) || [];
+  const gridRows = target.map((r) => ({
+    key: r.key,
+    checked: true,
+    badge: `<span class="badge warn">${r.diffCells.length}</span>`,
+    cells: Object.fromEntries(r.cells.map((c) => [c.field, { left: c.currentText, right: c.restoreText, changed: c.changed }])),
+  }));
+
+  const versionInfo = target.length
+    ? `<div class="scroll mt" style="max-height:200px"><table>
+        <thead><tr><th>${esc(CONFIG.keyColumn)}</th><th>현재 버전</th><th>복원 대상 버전</th><th>그 버전의 수정 시각</th><th>수정자</th></tr></thead>
+        <tbody>${target
+          .map(
+            (r) => `<tr class="${r.foreign ? '' : ''}">
+              <td class="mono">${esc(r.key)}</td>
+              <td class="mono">${esc(r.currentVersionId ?? '—')}${
+                r.skippedVersions > 0
+                  ? ` <span class="badge err">이후 수정 ${r.skippedVersions}건 건너뜀</span>`
+                  : r.foreign
+                    ? ' <span class="badge err">외부 수정</span>'
+                    : ''
+              }</td>
+              <td class="mono">${esc(r.versionId ?? '이력 기반')}</td>
+              <td class="mono">${r.versionAt ? esc(new Date(r.versionAt).toLocaleString('ko-KR')) : '—'}</td>
+              <td class="muted">${esc(r.versionBy || '')}</td>
+            </tr>`
+          )
+          .join('')}</tbody>
+      </table></div>`
+    : '';
+
+  return (
+    picker +
+    `<div class="card">
+      <h2>복원 계획 <span class="sub">${esc(at)} 조회 · 소요 ${ms(versionMs)}</span></h2>
+      <div class="stats">
+        ${stat('대상 항목', u.items)}
+        ${stat('되돌릴 항목', u.restorable, 'hi')}
+        ${stat('되돌릴 셀', u.cells, 'hi')}
+        ${stat('이미 동일', u.alreadySame)}
+        ${stat('건너뜀', u.skipped, u.skipped ? 'bad' : '')}
+      </div>
+      ${warnHtml.length ? alert('warn', warnHtml.join('<hr style="border:0;border-top:1px solid currentColor;opacity:.3;margin:8px 0" />')) : ''}
+      ${versionInfo}
+      <div class="row mt">
+        <button class="btn danger" data-act="rb-apply" ${s.busy || !u.restorable ? 'disabled' : ''}>
+          ${u.restorable}건 되돌리기 (실제 쓰기)
+        </button>
+        <span class="muted">배치 크기 ${s.writeOpts.batchSize} · 동시 ${s.writeOpts.concurrency} 로 실행됩니다.</span>
+      </div>
+      ${s.rollbackResult ? renderApplyResult(s.rollbackResult) : ''}
+    </div>
+
+    <div class="card">
+      <h2>복원 미리보기 <span class="sub">왼쪽 = 현재값(덮어써진 상태) · 오른쪽 = 되돌릴 값 · 빨간색이 복원 대상</span></h2>
+      ${
+        gridRows.length
+          ? splitGrid({ cols, rows: gridRows, leftTitle: '현재 — 덮어써진 값', rightTitle: '복원 — 적용 이전 값' }) +
+            `<div class="row mt"><span class="muted">${gridRows.length}건 전체 표시</span></div>`
+          : `<div class="empty">되돌릴 차이가 없습니다. 이미 적용 이전 상태입니다.</div>`
+      }
+    </div>`
+  );
+}
+
+// ------------------------------------------------------------------ ⑥ 벤치마크
 
 export function renderBench(s) {
   const r = s.readBench;
