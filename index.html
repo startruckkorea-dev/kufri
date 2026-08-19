@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KUFRI — SharePoint List ↔ Excel 동기화 PoC</title>
+    <link rel="stylesheet" href="./assets/app.css" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>🔄</text></svg>" />
+
+    <!-- .env → env.js (gitignore 됨). 없어도 동작하며 src/config.js 기본값을 쓴다. -->
+    <script src="./env.js" onerror="void 0"></script>
+
+    <!-- MSAL Browser v3 (Authorization Code + PKCE) -->
+    <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.28.1/lib/msal-browser.min.js"></script>
+    <!-- SheetJS — 다운로드 파싱 방식 비교용 -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+  </head>
+  <body>
+    <header class="app">
+      <h1>KUFRI PoC <span class="muted" style="font-weight: 400">· Excel → SharePoint List 동기화</span></h1>
+      <div class="spacer"></div>
+      <span class="who" id="who">로그인 필요</span>
+      <button class="btn" id="btn-login">Microsoft 계정으로 로그인</button>
+      <button class="btn" id="btn-logout" hidden>로그아웃</button>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button data-tab="setup" aria-selected="true">① 연결 · 매핑</button>
+      <button data-tab="diff" aria-selected="false">② 비교 (전/후)</button>
+      <button data-tab="changes" aria-selected="false">③ 변경 목록</button>
+      <button data-tab="bench" aria-selected="false">④ 벤치마크</button>
+    </nav>
+
+    <main id="view"></main>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

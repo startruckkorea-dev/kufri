@@ -1,0 +1,25 @@
+# 환경 변수 — 절대 커밋 금지
+.env
+.env.local
+.env.*.local
+
+# .env 로부터 생성되는 런타임 설정 (커밋 금지)
+env.js
+
+# 로컬 전용 문서 (푸시 금지)
+README.md
+
+# 의존성 / 빌드 산출물
+node_modules/
+dist/
+.cache/
+
+# OS / 편집기
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# 로그
+*.log
+npm-debug.log*
