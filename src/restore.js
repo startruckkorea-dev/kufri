@@ -133,6 +133,106 @@ export function buildRestorePlan(entry, versionsMap, cols, appliedBy) {
 }
 
 /**
+ * 시점 기준 복원 계획 — 적용 이력이 없어도 쓸 수 있다.
+ *
+ * 어떤 항목을 건드렸는지 몰라도 된다. 전체 항목의 버전 기록에서 기준 시각 직전 버전을 찾아
+ * 현재값과 비교하면, 건드리지 않은 항목은 "이미 동일"로 저절로 걸러진다.
+ *
+ * @param {Array}  listItems  리스트 전체 항목 (id, fields)
+ * @param {Map}    versionsMap readItemVersions 결과
+ * @param {Array}  cols       [{field, label, col}] 되돌릴 대상 컬럼
+ * @param {number} cutoffMs   기준 시각 (이 시각 이전 상태로 되돌린다)
+ * @param {string} keyField   키 컬럼 내부명
+ * @param {string} expectedUser 이 계정 외의 수정이 섞였는지 표시하기 위한 기준 계정
+ */
+export function buildPointInTimePlan(listItems, versionsMap, cols, cutoffMs, keyField, expectedUser) {
+  const keyCol = ctx.columns.find((c) => c.name === keyField) || { type: 'text' };
+  const rows = [];
+  const noVersion = [];
+  const allAfterCutoff = [];
+  const foreignEdit = [];
+  let untouched = 0;
+
+  for (const it of listItems) {
+    const key = display(it.fields?.[keyField], keyCol);
+    const vlist = versionsMap.get(it.id);
+
+    if (!vlist || !vlist.length) {
+      noVersion.push(key);
+      continue;
+    }
+
+    const ti = vlist.findIndex((v) => Date.parse(v.lastModifiedDateTime) < cutoffMs);
+    if (ti < 0) {
+      // 기준 시각 이전 버전이 아예 없다 = 그 이후에 처음 만들어진 항목
+      allAfterCutoff.push(key);
+      continue;
+    }
+    if (ti === 0) {
+      untouched++; // 기준 시각 이후 수정이 없다 = 손댈 것 없음
+      continue;
+    }
+
+    const current = vlist[0];
+    const target = vlist[ti];
+
+    const cells = cols.map((c) => {
+      const cur = current.fields?.[c.field];
+      const res = target.fields?.[c.field];
+      return {
+        field: c.field,
+        label: c.label,
+        current: cur,
+        restore: res,
+        currentText: display(cur, c.col),
+        restoreText: display(res, c.col),
+        changed: normalize(cur, c.col) !== normalize(res, c.col),
+        writeValue: toFieldValue(res, c.col),
+        after: res,
+        afterText: display(res, c.col),
+      };
+    });
+
+    const diffCells = cells.filter((c) => c.changed);
+    if (!diffCells.length) {
+      untouched++; // 버전은 늘었지만 우리가 되돌릴 컬럼은 그대로
+      continue;
+    }
+
+    const curBy = current.lastModifiedBy?.user?.email || current.lastModifiedBy?.user?.displayName || '';
+    const foreign = !!(expectedUser && curBy && nameKey(curBy) !== nameKey(expectedUser));
+    if (foreign) foreignEdit.push(key);
+
+    rows.push({
+      key,
+      itemId: it.id,
+      versionId: target.id,
+      versionAt: target.lastModifiedDateTime,
+      versionBy: target.lastModifiedBy?.user?.displayName || '',
+      currentVersionId: current.id,
+      currentAt: current.lastModifiedDateTime,
+      currentBy: current.lastModifiedBy?.user?.displayName || '',
+      foreign,
+      skippedVersions: ti - 1,
+      cells,
+      diffCells,
+    });
+  }
+
+  return {
+    rows,
+    warnings: { noVersion, foreignEdit, allAfterCutoff },
+    summary: {
+      items: listItems.length,
+      restorable: rows.length,
+      alreadySame: untouched,
+      cells: rows.reduce((a, r) => a + r.diffCells.length, 0),
+      skipped: noVersion.length + allAfterCutoff.length,
+    },
+  };
+}
+
+/**
  * 버전 기록을 못 쓸 때의 차선책 — 적용 이력에 남은 '전' 표시 문자열을 되돌린다.
  * 손실: 날짜의 초 단위(분까지만 기록됨). 그 외 텍스트/숫자/선택/예-아니오는 정확히 복원된다.
  */

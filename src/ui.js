@@ -439,16 +439,20 @@ export function renderRollback(s) {
 
   if (!s.connected)
     return `<div class="card"><div class="empty">먼저 <b>① 연결 · 매핑</b> 에서 연결하세요.</div></div>`;
-  if (!applied.length)
-    return `<div class="card"><div class="empty">되돌릴 적용 이력이 없습니다.<br />
-      <span class="muted">드라이런은 실제로 쓰지 않았으므로 롤백 대상이 아닙니다.</span></div></div>`;
 
-  const picker = `
-    <div class="card">
-      <h2>롤백 <span class="sub">적용 이전 상태로 되돌리기</span></h2>
-      ${alert('info', `되돌릴 값은 <b>SharePoint 버전 기록</b>에서 읽습니다 — 실제 저장됐던 원본 값이라 표시 문자열을 역변환하는 것보다 정확합니다.
-        버전 기록이 없으면 적용 이력의 '전' 값으로 대체하며, 이 경우 날짜의 초 단위가 유실됩니다.`)}
-      <div class="row">
+  const mode = s.rollbackMode;
+  const modeRow = `
+    <div class="row">
+      <label class="field"><span>방식</span>
+        <select data-act="rb-mode">
+          <option value="log" ${mode === 'log' ? 'selected' : ''}>적용 이력 기준 (이 브라우저에 이력이 있을 때)</option>
+          <option value="pit" ${mode === 'pit' ? 'selected' : ''}>시점 기준 (이력 없이 전체 스캔)</option>
+        </select>
+      </label>
+    </div>`;
+
+  const logPane = applied.length
+    ? `<div class="row mt">
         <label class="field"><span>되돌릴 적용</span>
           <select data-act="rb-entry">
             ${applied
@@ -462,8 +466,34 @@ export function renderRollback(s) {
           </select>
         </label>
         <button class="btn primary" data-act="rb-prepare" ${s.busy ? 'disabled' : ''}>복원 지점 조회</button>
-        <span class="muted">아직 아무것도 쓰지 않습니다. 조회 후 미리보기를 확인하세요.</span>
-      </div>
+        <span class="muted">아직 아무것도 쓰지 않습니다.</span>
+      </div>`
+    : alert(
+        'warn',
+        `이 브라우저에 적용 이력이 없습니다. 이력은 localStorage 에 저장되므로 <b>다른 브라우저·프로필이거나 이력을 삭제했다면 사라집니다.</b>
+         <br />위 <b>방식</b> 을 <b>시점 기준</b> 으로 바꾸면 이력 없이도 되돌릴 수 있습니다.`
+      );
+
+  const pitPane = `
+    ${alert(
+      'info',
+      `어떤 항목을 건드렸는지 몰라도 됩니다. 리스트 <b>전체 항목의 버전 기록</b>을 훑어 기준 시각 직전 버전을 찾고,
+       건드리지 않은 항목은 "이미 동일" 로 자동으로 걸러집니다.`
+    )}
+    <div class="row mt">
+      <label class="field"><span>이 시각 이전 상태로</span>
+        <input type="datetime-local" data-act="rb-cutoff" value="${esc(s.pitCutoff)}" />
+      </label>
+      <button class="btn primary" data-act="rb-scan" ${s.busy ? 'disabled' : ''}>전체 스캔</button>
+      <span class="muted">항목 수만큼 버전 조회가 나갑니다 (20건씩 $batch). 아직 아무것도 쓰지 않습니다.</span>
+    </div>
+    <div class="row"><span class="muted">기준 시각은 <b>테스트를 시작하기 직전</b> 으로 잡으세요. 너무 이르게 잡으면 그 사이의 정상 수정까지 되돌아갑니다.</span></div>`;
+
+  const picker = `
+    <div class="card">
+      <h2>롤백 <span class="sub">적용 이전 상태로 되돌리기</span></h2>
+      ${modeRow}
+      ${mode === 'log' ? logPane : pitPane}
     </div>`;
 
   if (!s.rollback) return picker;
@@ -485,6 +515,9 @@ export function renderRollback(s) {
       <br /><span class="muted">되돌리면 그 수정까지 함께 사라집니다. 아래 미리보기에서 반드시 확인하세요.</span>`);
   if (w.missing?.length)
     warnHtml.push(`리스트에서 찾지 못한 항목 ${w.missing.length}건: <span class="mono">${esc(w.missing.slice(0, 5).join(', '))}</span>`);
+  if (w.allAfterCutoff?.length)
+    warnHtml.push(`기준 시각 이전 버전이 없어 건너뛴 항목 ${w.allAfterCutoff.length}건 (그 이후 새로 만들어진 항목):
+      <span class="mono">${esc(w.allAfterCutoff.slice(0, 5).join(', '))}</span>`);
   if (errors?.length)
     warnHtml.push(`버전 조회에 실패한 항목 ${errors.length}건: <pre>${esc(errors.slice(0, 3).map((e) => `#${e.itemId} HTTP ${e.status} ${e.error}`).join('\n'))}</pre>`);
 
@@ -523,9 +556,9 @@ export function renderRollback(s) {
   return (
     picker +
     `<div class="card">
-      <h2>복원 계획 <span class="sub">${esc(at)} 조회 · 소요 ${ms(versionMs)}</span></h2>
+      <h2>복원 계획 <span class="sub">${esc(at)} 조회 · 소요 ${ms(versionMs)} · ${source === 'pit' ? '시점 기준' : source === 'log' ? '적용 이력 기반(대체)' : '버전 기록'}</span></h2>
       <div class="stats">
-        ${stat('대상 항목', u.items)}
+        ${stat('스캔 항목', u.items)}
         ${stat('되돌릴 항목', u.restorable, 'hi')}
         ${stat('되돌릴 셀', u.cells, 'hi')}
         ${stat('이미 동일', u.alreadySame)}

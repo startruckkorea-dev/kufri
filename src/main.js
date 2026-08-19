@@ -5,7 +5,7 @@ import { telemetry } from './graph.js';
 import { ctx, resolveAll, readListItems, readExcelViaWorkbook, readExcelViaDownload } from './sources.js';
 import { buildDiff, autoMap, resolveKeyColumns, nameKey, normalize, display } from './diff.js';
 import { applyChanges } from './sync.js';
-import { readItemVersions, buildRestorePlan, buildRestorePlanFromLog } from './restore.js';
+import { readItemVersions, buildRestorePlan, buildRestorePlanFromLog, buildPointInTimePlan } from './restore.js';
 import { renderSetup, renderDiff, renderChanges, renderResult, renderRollback, renderBench, esc } from './ui.js';
 
 const state = {
@@ -38,7 +38,9 @@ const state = {
   resultScope: 'changed',
 
   // ⑤ 롤백
+  rollbackMode: 'log', // 'log' = 적용 이력 기준, 'pit' = 시점 기준 전체 스캔
   rollbackEntryIdx: 0,
+  pitCutoff: startOfTodayValue(),
   rollback: null,
   rollbackResult: null,
 
@@ -49,6 +51,14 @@ const state = {
 
 const view = document.getElementById('view');
 const $ = (sel) => document.querySelector(sel);
+
+/** datetime-local 입력용 값 (로컬 시간대 기준 오늘 00:00) */
+function startOfTodayValue() {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 // ------------------------------------------------------------------ 렌더
 
@@ -311,6 +321,44 @@ async function actRbPrepare() {
   });
 }
 
+/**
+ * 시점 기준 스캔 — 적용 이력이 없어도 되돌릴 수 있는 경로.
+ * 리스트 전체 항목의 버전 기록을 훑어 기준 시각 직전 버전을 찾는다. 아직 쓰지 않는다.
+ */
+async function actRbScan() {
+  await guard('전체 항목 버전 기록 스캔 중', async () => {
+    const cutoffMs = Date.parse(state.pitCutoff);
+    if (!Number.isFinite(cutoffMs)) throw new Error('기준 시각이 올바르지 않습니다.');
+
+    const cols = restoreCols();
+    if (!cols.length) throw new Error('매핑된 컬럼이 없습니다. ① 탭에서 매핑을 먼저 설정하세요.');
+
+    const list = await readListItems(mappedFieldNames());
+    const { versions, errors, ms } = await readItemVersions(
+      list.items.map((i) => i.id),
+      { concurrency: state.writeOpts.concurrency }
+    );
+
+    const plan = buildPointInTimePlan(
+      list.items,
+      versions,
+      cols,
+      cutoffMs,
+      state.mapping.keyList,
+      state.account?.username
+    );
+
+    state.rollback = {
+      plan,
+      source: 'pit',
+      versionMs: list.ms + ms,
+      at: new Date().toLocaleString('ko-KR'),
+      errors,
+    };
+    state.rollbackResult = null;
+  });
+}
+
 /** 복원 실행 — 일반 적용과 같은 $batch 경로를 타므로 쓰기 성능도 함께 측정된다. */
 async function actRbApply() {
   const rows = state.rollback?.plan.rows.filter((r) => r.diffCells.length) || [];
@@ -449,12 +497,15 @@ document.getElementById('tabs').addEventListener('click', (e) => {
   render();
 });
 
-/** 롤백 선택값이 드라이런/없는 항목을 가리키지 않도록 보정 */
+/** 롤백 선택값 보정 — 이력이 없으면 시점 기준 방식으로 넘긴다 */
 function ensureRollbackEntry() {
-  const cur = state.changeLog[state.rollbackEntryIdx];
-  if (cur && !cur.dryRun) return;
   const idx = state.changeLog.findIndex((x) => !x.dryRun);
-  state.rollbackEntryIdx = idx >= 0 ? idx : 0;
+  if (idx < 0) {
+    state.rollbackMode = 'pit'; // 되돌릴 이력이 없으면 시점 기준밖에 방법이 없다
+    return;
+  }
+  const cur = state.changeLog[state.rollbackEntryIdx];
+  if (!cur || cur.dryRun) state.rollbackEntryIdx = idx;
 }
 
 $('#btn-login').addEventListener('click', () => login());
@@ -477,6 +528,8 @@ view.addEventListener('click', (e) => {
       return actReadBench();
     case 'rb-prepare':
       return actRbPrepare();
+    case 'rb-scan':
+      return actRbScan();
     case 'rb-apply':
       return actRbApply();
 
@@ -572,6 +625,14 @@ view.addEventListener('change', (e) => {
       state.rollback = null;
       state.rollbackResult = null;
       return render();
+    case 'rb-mode':
+      state.rollbackMode = el.value;
+      state.rollback = null;
+      state.rollbackResult = null;
+      return render();
+    case 'rb-cutoff':
+      state.pitCutoff = el.value; // 입력 포커스를 유지하려고 재렌더하지 않는다
+      return;
   }
 });
 
