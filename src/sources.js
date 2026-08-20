@@ -168,12 +168,27 @@ export async function readExcelViaWorkbook(sheetName = null) {
 export async function readExcelViaDownload(sheetName = null) {
   const t0 = performance.now();
 
-  const meta = await gfetch(
-    `/drives/${ctx.driveId}/items/${ctx.fileItem.id}?$select=id,name,size,@microsoft.graph.downloadUrl`,
-    { name: 'excel.dl.meta' }
-  );
-  const downloadUrl = meta['@microsoft.graph.downloadUrl'];
-  if (!downloadUrl) throw new Error('다운로드 URL을 받지 못했습니다.');
+  // @microsoft.graph.downloadUrl 은 선택 가능한 속성이 아니라 인스턴스 주석이다.
+  // $select 를 붙이면 응답에서 빠지는 경우가 있어, 기본 표현을 먼저 받고
+  // 그래도 없으면 문서가 안내하는 select=(달러 없음) 형태로 한 번 더 시도한다.
+  // (/content 는 302 리디렉션이라 CORS preflight 가 걸려 브라우저에서 쓸 수 없다)
+  const DL = '@microsoft.graph.downloadUrl';
+  const base = `/drives/${ctx.driveId}/items/${ctx.fileItem.id}`;
+
+  let meta = await gfetch(base, { name: 'excel.dl.meta' });
+  let downloadUrl = meta[DL];
+
+  if (!downloadUrl) {
+    meta = await gfetch(`${base}?select=id,name,size,${DL}`, { name: 'excel.dl.meta.retry' });
+    downloadUrl = meta[DL];
+  }
+
+  if (!downloadUrl) {
+    throw new Error(
+      `다운로드 URL을 받지 못했습니다. 파일이 폴더(또는 OneNote 등 스트림이 없는 항목)이거나 ` +
+        `Files.Read 권한이 없을 수 있습니다. 응답 키: ${Object.keys(meta).join(', ')}`
+    );
+  }
 
   // downloadUrl 은 사전 인증된 URL — Authorization 헤더를 붙이면 안 된다(CORS preflight 유발).
   const tDl = performance.now();
