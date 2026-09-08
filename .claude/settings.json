@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write|Edit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard.mjs\"",
+            "timeout": 15,
+            "statusMessage": "보안 체크리스트 검사 중"
+          }
+        ]
+      }
+    ]
+  }
+}
