@@ -93,14 +93,14 @@ export default function App() {
 
   /** 리스트 + Excel 을 읽어 차이를 계산 */
   const runDiff = useCallback(
-    () =>
+    (goToCompare = true) =>
       run('리스트 · Excel 읽는 중', async () => {
         const fields = [mapping.keyList, ...mapping.pairs.map((p) => p.list)].filter(Boolean);
         const list = await readListItems(fields);
         const excel = await readExcelViaWorkbook(sheet);
         setDiff(buildDiff(excel, list, mapping));
         setLastRead({ list, excel });
-        setTab('compare');
+        if (goToCompare) setTab('compare');
       }),
     [mapping, run, sheet]
   );
@@ -165,7 +165,7 @@ export default function App() {
             onRunDiff={runDiff}
           />
         ) : (
-          <Compare diff={diff} lastRead={lastRead} />
+          <Compare diff={diff} lastRead={lastRead} onApplied={() => runDiff(false)} />
         )}
       </main>
     </>

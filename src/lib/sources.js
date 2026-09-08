@@ -1,6 +1,6 @@
 // 데이터 소스 계층 — SharePoint 리스트 읽기 / Excel 파일 읽기(2가지 방식)
 import { CONFIG } from './config.js';
-import { gfetch, gfetchAll, telemetry } from './graph.js';
+import { gfetch, gfetchAll } from './graph.js';
 
 /** 세션 동안 재사용하는 리졸브 결과 */
 export const ctx = {

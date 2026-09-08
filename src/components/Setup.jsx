@@ -230,7 +230,7 @@ export default function Setup({
                 이름으로 자동 매핑
               </button>
               <div style={{ flex: 1 }} />
-              <button className="btn primary" onClick={onRunDiff} disabled={busy || !mappingReady}>
+              <button className="btn primary" onClick={() => onRunDiff()} disabled={busy || !mappingReady}>
                 데이터 읽기 &amp; 비교 실행
               </button>
             </div>

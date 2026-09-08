@@ -1,21 +1,18 @@
-// Microsoft Graph 호출 계층 — 계측(timing) + 429/5xx 재시도 + $batch
+// Microsoft Graph 호출 계층 — 429/5xx 재시도 + $batch + 최근 호출 기록
 import { CONFIG } from './config.js';
 import { getToken } from './auth.js';
 
-/** 모든 호출의 계측 레코드. 벤치마크 화면이 이걸 읽는다. */
+/**
+ * 최근 호출 기록. 벤치마크 화면은 제거했고, 오류 진단용으로만 남긴다.
+ * 무한히 쌓이면 긴 세션에서 메모리가 새므로 최근 MAX 건만 보관한다.
+ */
+const MAX_CALLS = 200;
 export const telemetry = {
   calls: [],
-  reset() {
-    this.calls.length = 0;
-  },
   add(rec) {
     this.calls.push(rec);
+    if (this.calls.length > MAX_CALLS) this.calls.splice(0, this.calls.length - MAX_CALLS);
     return rec;
-  },
-  /** name prefix 로 필터한 요약 통계 */
-  summary(prefix) {
-    const rows = this.calls.filter((c) => !prefix || c.name.startsWith(prefix));
-    return statsOf(rows.map((r) => r.ms));
   },
 };
 
