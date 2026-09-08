@@ -1,0 +1,62 @@
+# GitHub Pages 배포
+#
+# [체크리스트 5-03] 개발자가 직접 운영에 배포하는 방식 금지.
+#   브랜치 push 로 바로 서빙되던 PoC 방식 대신, 빌드와 배포를 분리하고
+#   production 환경의 보호 규칙(승인자 지정)을 거치도록 한다.
+#   => 저장소 Settings > Environments > production 에 Required reviewers 를 설정해야
+#      이 워크플로가 승인 게이트로 동작한다. 설정 전에는 승인 없이 배포된다.
+#
+# [체크리스트 5-05] 배포 전 의존성 취약점 점검을 통과해야 한다.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 배포는 동시에 하나만. 진행 중인 배포는 취소하지 않는다.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 의존성 설치 (lockfile 고정)
+        run: npm ci
+
+      # [체크리스트 5-05 / 9-02] high 이상 취약점이 있으면 배포를 막는다
+      - name: 취약점 점검
+        run: npm audit --audit-level=high
+
+      - name: 빌드
+        run: npm run build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    # 이 environment 에 Required reviewers 를 걸면 승인 없이는 배포되지 않는다
+    environment:
+      name: production
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
