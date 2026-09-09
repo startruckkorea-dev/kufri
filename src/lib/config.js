@@ -21,7 +21,12 @@ export const CONFIG = {
 
   graphBase: 'https://graph.microsoft.com/v1.0',
   // [체크리스트 1-03] 최소 권한. Sites.Selected 로 좁힐 수 있는지 검토 중.
-  scopes: ['User.Read', 'Sites.ReadWrite.All', 'Files.Read.All'],
+  //
+  // 주의: 여기 적는 scope 는 앱 등록에 "관리자 동의된" 것과 문자 단위로 같아야 한다.
+  // Files.ReadWrite.All 에 동의돼 있어도 Files.Read.All 은 별개의 scope 라 동의가 없다.
+  // 사용자 동의가 정책으로 막힌 테넌트에서는 AADSTS65001/90094 로 로그인 자체가 실패한다.
+  // (실사이트 전환 때 Read.All 로 줄였다가 이 문제로 되돌림. 줄이려면 앱 등록에 먼저 동의를 추가할 것)
+  scopes: ['User.Read', 'Sites.ReadWrite.All', 'Files.ReadWrite.All'],
 
   defaults: { batchSize: 20, concurrency: 2, listPageSize: 999, maxRetry: 3 },
 };

@@ -28,13 +28,17 @@ export default function App() {
   useEffect(() => {
     initAuth()
       .then(setAccount)
-      .catch((e) =>
-        setError(
-          new Error(
-            `MSAL 초기화 실패: ${e.message} — 앱 등록의 SPA 리디렉션 URI 가 '${redirectUri()}' 와 일치하는지 확인하세요.`
-          )
-        )
-      )
+      .catch((e) => {
+        // 원인별로 다른 힌트를 준다. 항상 "리디렉션 URI 확인" 만 띄우면 엉뚱한 곳을 보게 된다.
+        const code = e.errorCode || e.name || '';
+        const text = `${code} ${e.message}`;
+        const hint = /65001|90094|consent/i.test(text)
+          ? '동의되지 않은 scope 를 요청했습니다. 앱 등록의 API 권한(관리자 동의)과 config.js 의 scopes 가 문자 단위로 같아야 합니다.'
+          : /50011|redirect_uri/i.test(text)
+            ? `앱 등록의 SPA 리디렉션 URI 가 '${redirectUri()}' 와 문자 단위로 일치하는지 확인하세요.`
+            : '브라우저 콘솔에 Content-Security-Policy 위반 메시지가 있는지도 확인하세요.';
+        setError(new Error(`MSAL 초기화 실패 [${code}]: ${e.message} — ${hint}`));
+      })
       .finally(() => setBooting(false));
   }, []);
 
