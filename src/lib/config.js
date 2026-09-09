@@ -28,7 +28,8 @@ export const CONFIG = {
   // (실사이트 전환 때 Read.All 로 줄였다가 이 문제로 되돌림. 줄이려면 앱 등록에 먼저 동의를 추가할 것)
   scopes: ['User.Read', 'Sites.ReadWrite.All', 'Files.ReadWrite.All'],
 
-  defaults: { batchSize: 20, concurrency: 2, listPageSize: 999, maxRetry: 3 },
+  // concurrency 는 SharePoint 부하 레버. PoC 검증값 4 로 운용한다 (300건 규모에서 RU 한도 내).
+  defaults: { batchSize: 20, concurrency: 4, listPageSize: 999, maxRetry: 3 },
 };
 
 /** 앱 등록의 SPA 리디렉션 URI 와 문자 단위로 일치해야 한다. */
