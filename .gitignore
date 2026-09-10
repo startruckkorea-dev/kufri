@@ -21,3 +21,7 @@ npm-debug.log*
 
 # Claude Code 개인 설정 (.claude/settings.json 과 hooks 는 팀 공유이므로 커밋)
 .claude/settings.local.json
+
+# 문서 — 로컬에서만 관리한다. 공개 저장소에 올리지 않는다
+*.md
+docs/
