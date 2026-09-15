@@ -202,14 +202,18 @@ export function buildDiff(excel, list, mapping) {
 export const decodeSpName = (s) =>
   String(s ?? '').replace(/_x([0-9a-fA-F]{4})_/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
 
-/** 이름 비교용 정규화 — 대소문자/공백/마침표/언더스코어/괄호 차이를 모두 흡수 */
+/**
+ * 이름 비교용 정규화 — 대소문자/공백/마침표/언더스코어/괄호 차이를 모두 흡수.
+ * 글자와 숫자만 남긴다 (유니코드 기준 — 독일어 움라우트, 한글 모두 보존).
+ */
 export const nameKey = (s) =>
   decodeSpName(s)
     .toLowerCase()
-    .replace(/[^a-z0-9가-힣]/g, '');
+    .replace(/[^\p{L}\p{N}]/gu, '');
 
 /**
- * 설정된 키 컬럼명(CONFIG.keyColumn)을 양쪽 소스에서 자동으로 찾아낸다.
+ * 키 컬럼명 하나를 양쪽 소스에서 이름으로 찾아낸다. (이름이 같은 소스 쌍용 — 지금의 SDISP 동기화는
+ * 이름이 달라 resolveMapping 을 쓴다. 다른 동기화 정의에서 autoMap 과 함께 쓸 수 있게 남겨 둔다)
  * 사용자가 고르지 않는다. 정확 일치 → (후보가 유일할 때만) 부분 일치 순으로 시도.
  */
 export function resolveKeyColumns(excelHeaders, columns, keyName) {
@@ -239,4 +243,60 @@ export function autoMap(excelHeaders, columns, exclude = {}) {
     pairs.push({ excel: h, list: hit.name });
   }
   return pairs;
+}
+
+/**
+ * 고정 대응표(CONFIG.mapping)를 실제 열 이름으로 해석한다.
+ * list 쪽은 내부명/표시명 정확 일치 → 정규화 일치, excel 쪽은 헤더 정확 일치 → 정규화 일치 순.
+ * 못 찾은 항목은 missing 에 모은다. 조용히 건너뛰지 않고 호출자가 오류로 멈춘다.
+ * 쓸 수 없는 열(읽기 전용·lookup·person·calculated)은 readOnly 에 모으고 갱신 대상에서 뺀다.
+ *
+ * @returns {{ ok:boolean, mapping:{keyExcel,keyList,pairs}, missing:{list:string[],excel:string[]}, readOnly:string[], rows:Array }}
+ */
+export function resolveMapping(spec, excelHeaders, columns) {
+  const findCol = (want) => {
+    const exact = columns.find((c) => c.name === want || c.displayName === want);
+    if (exact) return exact;
+    const k = nameKey(want);
+    return k ? columns.find((c) => nameKey(c.name) === k || nameKey(c.displayName) === k) || null : null;
+  };
+  const findHeader = (want) => {
+    const exact = excelHeaders.find((h) => h === want);
+    if (exact) return exact;
+    const k = nameKey(want);
+    return k ? excelHeaders.find((h) => nameKey(h) === k) || null : null;
+  };
+  const unwritable = (c) => c.readOnly || ['lookup', 'person', 'calculated'].includes(c.type);
+
+  const missing = { list: [], excel: [] };
+  const readOnly = [];
+  const rows = []; // 화면 표시용: 대응표 한 줄씩의 해석 결과
+
+  const key = { col: findCol(spec.key.list), header: findHeader(spec.key.excel) };
+  if (!key.col) missing.list.push(spec.key.list);
+  if (!key.header) missing.excel.push(spec.key.excel);
+  rows.push({ isKey: true, spec: spec.key, col: key.col, header: key.header, status: key.col && key.header ? 'ok' : 'missing' });
+
+  const pairs = [];
+  for (const p of spec.pairs) {
+    const col = findCol(p.list);
+    const header = findHeader(p.excel);
+    if (!col) missing.list.push(p.list);
+    if (!header) missing.excel.push(p.excel);
+    let status = 'ok';
+    if (!col || !header) status = 'missing';
+    else if (unwritable(col)) {
+      status = 'readonly';
+      readOnly.push(col.displayName || col.name);
+    } else pairs.push({ excel: header, list: col.name });
+    rows.push({ isKey: false, spec: p, col, header, status });
+  }
+
+  return {
+    ok: !missing.list.length && !missing.excel.length,
+    mapping: { keyExcel: key.header || '', keyList: key.col?.name || '', pairs },
+    missing,
+    readOnly,
+    rows,
+  };
 }

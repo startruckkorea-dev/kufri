@@ -104,7 +104,7 @@ function SplitGrid({ cols, rows, selected, onToggle, leftTitle, rightTitle }) {
             </tr>
             <tr>
               <th className="chk" />
-              <th>{CONFIG.keyColumn}</th>
+              <th title={`Excel 헤더: ${CONFIG.mapping.key.excel}`}>{CONFIG.mapping.key.list}</th>
               <th title="행이 원래 있던 리스트. 적용도 이 리스트로 갑니다">리스트</th>
               <th className="num" title="바뀌는 필드 수">
                 Δ

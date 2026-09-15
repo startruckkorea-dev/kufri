@@ -22,8 +22,33 @@ export const CONFIG = {
   // 파일명 접두어. 정확히 같은 이름이 없으면 이 접두어로 시작하는 파일 중 가장 최근 수정본을 쓴다.
   fileBaseName: pick('VITE_FILE_BASENAME', 'SDISP'),
 
-  // 두 소스의 행을 매칭하는 고유 키. 사용자가 고르지 않고 이름으로 자동 매칭한다.
-  keyColumn: pick('VITE_KEY_COLUMN', 'Commission no.'),
+  // 두 소스의 열 대응표. 리스트 열 내부명(영문)과 SDISP 파일 헤더(독일어)가 서로 달라
+  // 이름 기반 자동 매칭이 불가능하므로 고정한다. 사용자가 화면에서 바꾸지 않는다.
+  //   list  : SharePoint 열 내부명 또는 표시명 (정확 일치 → 정규화 일치 순으로 찾는다)
+  //   excel : SDISP 파일 헤더
+  // key 는 행 매칭 기준이며 갱신하지 않는다. 대응표의 열을 하나라도 못 찾으면 비교를 시작하지 않는다.
+  mapping: {
+    key: { list: 'commission_no', excel: 'Auftragsnummer' },
+    pairs: [
+      { list: 'baumuster', excel: 'Baumuster' },
+      { list: 'model_in_afab', excel: 'Fahrzeugtyp' },
+      { list: 'vessel', excel: 'Schiffsname' },
+      { list: 'engine_no', excel: 'Motor-Nr.' },
+      { list: 'sub_cat', excel: 'Subkat.' },
+      { list: 'color', excel: 'Lack 1' },
+      { list: 'vin_no', excel: 'Fahrzeug-Ident-Nr. (FIN)' },
+      { list: 'order_date', excel: 'Bestelldatum' },
+      { list: 'change', excel: 'Ä' },
+      { list: 'changeability_date', excel: 'Änderbarkeitsdatum' },
+      { list: 'actualpm', excel: 'LT-Quote' },
+      { list: 'disfatch', excel: 'Versand' },
+      { list: 'tdd_cal', excel: 'GLT-Err.' },
+      { list: 'tdd_actual', excel: 'GLT-Ist' },
+      { list: 'shipping', excel: 'Abgangsdatum' },
+      { list: 'invoice', excel: 'Rg.-Datum' },
+      { list: 'planned_arrival', excel: 'Gepl. Ankunftsdatum' },
+    ],
+  },
 
   graphBase: 'https://graph.microsoft.com/v1.0',
   // [체크리스트 1-03] 최소 권한. Sites.Selected 로 좁힐 수 있는지 검토 중.
@@ -61,22 +86,4 @@ export const msalConfig = {
       },
     },
   },
-};
-
-// 매핑 설정만 로컬에 보관한다.
-// [체크리스트 4-02] 감사 증적은 localStorage 가 아니라 SharePoint 버전 기록 / 변경 로그 리스트에 남긴다.
-const MAP_KEY = 'kufri_mapping_v1';
-export const loadMapping = () => {
-  try {
-    return JSON.parse(localStorage.getItem(MAP_KEY)) || null;
-  } catch {
-    return null;
-  }
-};
-export const saveMapping = (m) => {
-  try {
-    localStorage.setItem(MAP_KEY, JSON.stringify(m));
-  } catch {
-    /* 저장 실패는 기능에 영향 없음 */
-  }
 };

@@ -1,8 +1,17 @@
 import { CONFIG } from '../lib/config.js';
-import { autoMap } from '../lib/diff.js';
 
 const kb = (b) => (b == null ? '—' : b >= 1048576 ? `${(b / 1048576).toFixed(2)} MB` : `${Math.round(b / 1024)} KB`);
 
+const STATUS = {
+  ok: { cls: 'ok', text: '확인' },
+  missing: { cls: 'err', text: '못 찾음' },
+  readonly: { cls: 'warn', text: '쓰기 불가 · 제외' },
+};
+
+/**
+ * 연결 화면. 대응표(CONFIG.mapping)는 고정이며 여기서는 해석 결과만 보여준다.
+ * 사용자가 열을 고르는 UI 는 없다 — 못 찾은 열이 있으면 config.js 를 고쳐야 한다.
+ */
 export default function Setup({
   account,
   busy,
@@ -10,12 +19,11 @@ export default function Setup({
   sheets,
   sheet,
   excelHeaders,
-  keyError,
   mapping,
+  mappingReport,
   mappingReady,
   onConnect,
   onSheetChange,
-  onMappingChange,
   onRunDiff,
 }) {
   if (!account) {
@@ -31,13 +39,7 @@ export default function Setup({
   }
 
   const columns = schema?.columns ?? [];
-  const writable = columns.filter((c) => !c.readOnly && !['lookup', 'person', 'calculated'].includes(c.type));
-  const pairCols = writable.filter((c) => c.name !== mapping.keyList);
-  const pairHeaders = excelHeaders.filter((h) => h !== mapping.keyExcel);
-  const keyColLabel = columns.find((c) => c.name === mapping.keyList)?.displayName || mapping.keyList;
-
-  const setPair = (i, patch) =>
-    onMappingChange({ ...mapping, pairs: mapping.pairs.map((p, n) => (n === i ? { ...p, ...patch } : p)) });
+  const rows = mappingReport?.rows ?? [];
 
   return (
     <>
@@ -66,7 +68,7 @@ export default function Setup({
               </>
             ) : (
               <>
-                {CONFIG.fileBaseName} <span className="muted">(확장자 탐색 예정)</span>
+                {CONFIG.fileBaseName}* <span className="muted">(접두어 일치 중 최근 수정본)</span>
               </>
             )}
           </dd>
@@ -110,135 +112,66 @@ export default function Setup({
 
           <div className="card">
             <h2>
-              컬럼 매핑 <span className="sub">Excel 헤더 → SharePoint 리스트 내부 컬럼명</span>
+              열 대응표 <span className="sub">config.js 에 고정 · Excel 헤더 → SharePoint 리스트 열</span>
             </h2>
 
-            {keyError ? (
-              <>
-                <div className="alert warn">{keyError}</div>
-                <div className="row">
-                  <label className="field">
-                    <span>키 (Excel)</span>
-                    <select
-                      value={mapping.keyExcel}
-                      onChange={(e) => onMappingChange({ ...mapping, keyExcel: e.target.value })}
-                    >
-                      <option value="">— 선택 —</option>
-                      {excelHeaders.map((h) => (
-                        <option key={h} value={h}>
-                          {h}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>키 (List)</span>
-                    <select
-                      value={mapping.keyList}
-                      onChange={(e) => onMappingChange({ ...mapping, keyList: e.target.value })}
-                    >
-                      <option value="">— 선택 —</option>
-                      {columns.map((c) => (
-                        <option key={c.name} value={c.name}>
-                          {(c.displayName || c.name) + ' (' + c.type + ')'}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="row">
-                  <span className="badge ok">키 자동 매칭됨</span>
-                  <span className="muted">기준 키</span> <b className="mono">{CONFIG.keyColumn}</b>
-                  <span className="muted">·</span>
-                  <span className="muted">Excel</span> <span className="mono">{mapping.keyExcel}</span>
-                  <span className="muted">→ List</span> <span className="mono">{keyColLabel}</span>
-                  <span className="muted">(내부명 {mapping.keyList})</span>
-                </div>
-                <div className="row">
-                  <span className="muted">키는 매칭 기준이므로 갱신 대상에서 제외됩니다.</span>
-                </div>
-              </>
-            )}
+            {mappingReport && !mappingReport.ok ? (
+              <div className="alert err">
+                대응표의 열을 찾지 못해 비교를 시작할 수 없습니다. 아래 <b>못 찾음</b> 행의 이름을 실제 열 이름과
+                맞춰 config.js 를 고치세요.
+              </div>
+            ) : null}
+            {mappingReport?.readOnly.length ? (
+              <div className="alert warn">
+                쓸 수 없는 열이라 갱신 대상에서 뺐습니다: <span className="mono">{mappingReport.readOnly.join(', ')}</span>
+              </div>
+            ) : null}
 
             <div className="scroll mt">
               <table>
                 <thead>
                   <tr>
-                    <th style={{ width: '34%' }}>Excel 헤더</th>
+                    <th style={{ width: '30%' }}>Excel 헤더</th>
                     <th style={{ width: 24 }} />
-                    <th style={{ width: '34%' }}>List 컬럼</th>
+                    <th style={{ width: '30%' }}>List 열</th>
                     <th>타입</th>
-                    <th style={{ width: 70 }} />
+                    <th style={{ width: 130 }}>상태</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {mapping.pairs.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="empty">
-                        매핑이 없습니다. 자동 매핑을 누르거나 행을 추가하세요.
-                      </td>
-                    </tr>
-                  ) : null}
-                  {mapping.pairs.map((p, i) => (
-                    <tr key={i}>
-                      <td>
-                        <select value={p.excel} onChange={(e) => setPair(i, { excel: e.target.value })}>
-                          <option value="">— 선택 —</option>
-                          {pairHeaders.map((h) => (
-                            <option key={h} value={h}>
-                              {h}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="muted">→</td>
-                      <td>
-                        <select value={p.list} onChange={(e) => setPair(i, { list: e.target.value })}>
-                          <option value="">— 선택 —</option>
-                          {pairCols.map((c) => (
-                            <option key={c.name} value={c.name}>
-                              {(c.displayName || c.name) + ' (' + c.type + ')'}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td>
-                        {p.list ? (
-                          <span className="badge">{columns.find((c) => c.name === p.list)?.type ?? ''}</span>
-                        ) : null}
-                      </td>
-                      <td>
-                        <button
-                          className="btn sm danger"
-                          onClick={() =>
-                            onMappingChange({ ...mapping, pairs: mapping.pairs.filter((_, n) => n !== i) })
-                          }
-                        >
-                          삭제
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {rows.map((r, i) => {
+                    const st = STATUS[r.status];
+                    return (
+                      <tr key={i}>
+                        <td className="mono">
+                          {r.spec.excel}
+                          {r.header && r.header !== r.spec.excel ? (
+                            <span className="muted"> (실제: {r.header})</span>
+                          ) : null}
+                        </td>
+                        <td className="muted">→</td>
+                        <td className="mono">
+                          {r.col ? r.col.displayName || r.col.name : r.spec.list}
+                          {r.col && r.col.name !== (r.col.displayName || r.col.name) ? (
+                            <span className="muted"> (내부명 {r.col.name})</span>
+                          ) : null}
+                        </td>
+                        <td>{r.col ? <span className="badge">{r.col.type}</span> : null}</td>
+                        <td>
+                          {r.isKey ? <span className="badge">키 · 갱신 안 함</span> : null}{' '}
+                          <span className={`badge ${st.cls}`}>{st.text}</span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
             <div className="row mt">
-              <button
-                className="btn"
-                onClick={() => onMappingChange({ ...mapping, pairs: [...mapping.pairs, { excel: '', list: '' }] })}
-              >
-                행 추가
-              </button>
-              <button
-                className="btn"
-                onClick={() => onMappingChange({ ...mapping, pairs: autoMap(excelHeaders, writable, mapping) })}
-              >
-                이름으로 자동 매핑
-              </button>
+              <span className="muted">
+                갱신 대상 {mapping.pairs.length}열 · 키 <span className="mono">{mapping.keyList || '—'}</span>
+              </span>
               <div style={{ flex: 1 }} />
               <button className="btn primary" onClick={() => onRunDiff()} disabled={busy || !mappingReady}>
                 데이터 읽기 &amp; 비교 실행
