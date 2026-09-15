@@ -5,9 +5,10 @@ import { gfetch, gfetchAll } from './graph.js';
 /** 세션 동안 재사용하는 리졸브 결과 */
 export const ctx = {
   siteId: null,
-  listId: null,
-  listTitle: null,
-  columns: [], // {name, displayName, type, readOnly, dateFormat, choices}
+  lists: [], // [{id, name, title, columns}] — 행으로 나뉜 리스트들. 순서는 CONFIG.listNames
+  listTitle: null, // 표시용. 여러 개면 ' + ' 로 잇는다
+  columns: [], // 모든 리스트에 공통인 열 {name, displayName, type, readOnly, dateFormat, choices}
+  columnMismatch: [], // 일부 리스트에만 있는 열 이름 (매핑 대상에서 제외)
   driveId: null,
   fileItem: null, // {id, name, size, webUrl}
 };
@@ -23,29 +24,31 @@ export async function resolveAll() {
   const lists = await gfetch(`/sites/${ctx.siteId}/lists?$select=id,name,displayName,webUrl`, {
     name: 'resolve.lists',
   });
-  const target = (lists.value || []).find(
-    (l) => l.name === CONFIG.listName || l.displayName === CONFIG.listName
-  );
-  if (!target) {
+  const all = lists.value || [];
+  const found = CONFIG.listNames.map((want) => all.find((l) => l.name === want || l.displayName === want) || null);
+  const missing = CONFIG.listNames.filter((_, i) => !found[i]);
+  if (missing.length) {
     throw new Error(
-      `리스트 '${CONFIG.listName}' 를 찾지 못했습니다. 사이트에 존재하는 리스트: ` +
-        (lists.value || []).map((l) => l.name).join(', ')
+      `리스트 '${missing.join("', '")}' 를 찾지 못했습니다. 사이트에 존재하는 리스트: ` +
+        all.map((l) => l.name).join(', ')
     );
   }
-  ctx.listId = target.id;
-  ctx.listTitle = target.displayName || target.name;
 
-  const cols = await gfetch(`/sites/${ctx.siteId}/lists/${ctx.listId}/columns`, { name: 'resolve.columns' });
-  ctx.columns = (cols.value || [])
-    .filter((c) => !c.hidden)
-    .map((c) => ({
-      name: c.name,
-      displayName: c.displayName,
-      readOnly: !!c.readOnly,
-      type: columnType(c),
-      dateFormat: c.dateTime?.format || null, // 'dateOnly' | 'dateTime'
-      choices: c.choice?.choices || null,
-    }));
+  // 리스트마다 열을 읽는다. 순차 호출 — 리스트 수는 적고 부하를 평탄하게 유지한다
+  ctx.lists = [];
+  for (const l of found) {
+    const cols = await gfetch(`/sites/${ctx.siteId}/lists/${l.id}/columns`, { name: `resolve.columns:${l.name}` });
+    ctx.lists.push({ id: l.id, name: l.name, title: l.displayName || l.name, columns: mapColumns(cols.value || []) });
+  }
+  ctx.listTitle = ctx.lists.map((l) => l.title).join(' + ');
+
+  // 매핑 대상은 모든 리스트에 공통인 열만. 일부에만 있는 열은 이름을 남겨 화면에서 알린다.
+  const [first, ...rest] = ctx.lists;
+  ctx.columns = first.columns.filter((c) => rest.every((l) => l.columns.some((o) => o.name === c.name)));
+  const common = new Set(ctx.columns.map((c) => c.name));
+  ctx.columnMismatch = [
+    ...new Set(ctx.lists.flatMap((l) => l.columns.map((c) => c.name)).filter((n) => !common.has(n))),
+  ];
 
   const drive = await gfetch(`/sites/${ctx.siteId}/drive?$select=id,name,webUrl`, { name: 'resolve.drive' });
   ctx.driveId = drive.id;
@@ -57,9 +60,13 @@ export async function resolveAll() {
     { name: 'resolve.folder' }
   );
   const base = CONFIG.fileBaseName.toLowerCase();
+  const files = children.value || [];
   const file =
-    (children.value || []).find((f) => stripExt(f.name).toLowerCase() === base) ||
-    (children.value || []).find((f) => f.name.toLowerCase().startsWith(base));
+    files.find((f) => stripExt(f.name).toLowerCase() === base) ||
+    // 접두어 일치가 여럿이면 가장 최근에 수정된 파일을 쓴다 (예: SDISP_20260915.xlsx)
+    files
+      .filter((f) => f.name.toLowerCase().startsWith(base))
+      .sort((a, b) => String(b.lastModifiedDateTime).localeCompare(String(a.lastModifiedDateTime)))[0];
   if (!file) {
     throw new Error(
       `'${CONFIG.fileFolder}' 폴더에서 '${CONFIG.fileBaseName}' 파일을 찾지 못했습니다. ` +
@@ -85,6 +92,19 @@ function columnType(c) {
 
 const stripExt = (n) => n.replace(/\.[^.]+$/, '');
 
+/** Graph columnDefinition[] → 화면·비교에서 쓰는 축약형. 숨김 열 제외 */
+const mapColumns = (raw) =>
+  raw
+    .filter((c) => !c.hidden)
+    .map((c) => ({
+      name: c.name,
+      displayName: c.displayName,
+      readOnly: !!c.readOnly,
+      type: columnType(c),
+      dateFormat: c.dateTime?.format || null, // 'dateOnly' | 'dateTime'
+      choices: c.choice?.choices || null,
+    }));
+
 /** 쓰기 가능한 컬럼만 매핑 대상으로 노출 */
 export const writableColumns = () =>
   ctx.columns.filter((c) => !c.readOnly && !['lookup', 'person', 'calculated'].includes(c.type));
@@ -92,7 +112,8 @@ export const writableColumns = () =>
 // ---------------------------------------------------------------- 리스트 읽기
 
 /**
- * 리스트 아이템 전체 읽기.
+ * 대상 리스트 전체의 아이템을 합쳐 읽는다. 항목마다 소속 리스트(listId)를 붙여
+ * 쓰기 때 원래 리스트로 돌아가게 한다. 리스트는 순차로 읽는다 (부하 평탄화).
  * @param {string[]|null} fieldNames 지정 시 $select 로 필요한 필드만 (읽기 속도 최적화)
  */
 export async function readListItems(fieldNames = null) {
@@ -100,18 +121,35 @@ export async function readListItems(fieldNames = null) {
   const expand = fieldNames?.length
     ? `fields($select=${[...new Set(fieldNames)].join(',')})`
     : 'fields';
-  const url =
-    `/sites/${ctx.siteId}/lists/${ctx.listId}/items` +
-    `?$expand=${expand}&$select=id,lastModifiedDateTime&$top=${CONFIG.defaults.listPageSize}`;
 
-  const { items, pages } = await gfetchAll(url, { name: 'read.list' });
+  const items = [];
+  const perList = [];
+  let pages = 0;
+  for (const l of ctx.lists) {
+    const url =
+      `/sites/${ctx.siteId}/lists/${l.id}/items` +
+      `?$expand=${expand}&$select=id,lastModifiedDateTime&$top=${CONFIG.defaults.listPageSize}`;
+    const r = await gfetchAll(url, { name: `read.list:${l.name}` });
+    for (const it of r.items) {
+      items.push({
+        id: it.id,
+        listId: l.id,
+        listTitle: l.title,
+        fields: it.fields || {},
+        lastModified: it.lastModifiedDateTime,
+      });
+    }
+    perList.push({ title: l.title, count: r.items.length, pages: r.pages });
+    pages += r.pages;
+  }
   const ms = performance.now() - t0;
 
   return {
-    items: items.map((it) => ({ id: it.id, fields: it.fields || {}, lastModified: it.lastModifiedDateTime })),
+    items,
     ms,
     pages,
     count: items.length,
+    perList,
     mode: fieldNames?.length ? 'select 최적화' : '전체 필드',
   };
 }

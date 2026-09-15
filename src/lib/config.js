@@ -12,9 +12,15 @@ export const CONFIG = {
 
   hostname: pick('VITE_SP_HOSTNAME', 'startruckkorea.sharepoint.com'),
   sitePath: pick('VITE_SP_SITE_PATH', '/sites/STK-Kufri'),
-  listName: pick('VITE_LIST_NAME', 'vehicle_daily'),
+  // 동기화 대상 리스트. 행으로 나뉜 리스트 여러 개를 하나의 대상으로 다룬다 (열 구성은 같아야 한다).
+  // 한 행(키)은 이 중 한 리스트에만 있어야 하며, 쓰기는 그 행이 원래 있던 리스트로 간다.
+  listNames: pick('VITE_LIST_NAMES', 'logi_master_1,logi_master_2')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   fileFolder: pick('VITE_FILE_FOLDER', 'STK-Kufri_Data'),
-  fileBaseName: pick('VITE_FILE_BASENAME', 'afab_test'),
+  // 파일명 접두어. 정확히 같은 이름이 없으면 이 접두어로 시작하는 파일 중 가장 최근 수정본을 쓴다.
+  fileBaseName: pick('VITE_FILE_BASENAME', 'SDISP'),
 
   // 두 소스의 행을 매칭하는 고유 키. 사용자가 고르지 않고 이름으로 자동 매칭한다.
   keyColumn: pick('VITE_KEY_COLUMN', 'Commission no.'),

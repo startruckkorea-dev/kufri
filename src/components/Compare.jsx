@@ -93,17 +93,19 @@ function SplitGrid({ cols, rows, selected, onToggle, leftTitle, rightTitle }) {
           <colgroup>
             <col style={{ width: 34 }} />
             <col />
+            <col style={{ width: 110 }} />
             <col style={{ width: 52 }} />
           </colgroup>
           <thead>
             <tr>
-              <th className="grp" colSpan={3}>
+              <th className="grp" colSpan={4}>
                 &nbsp;
               </th>
             </tr>
             <tr>
               <th className="chk" />
               <th>{CONFIG.keyColumn}</th>
+              <th title="행이 원래 있던 리스트. 적용도 이 리스트로 갑니다">리스트</th>
               <th className="num" title="바뀌는 필드 수">
                 Δ
               </th>
@@ -122,6 +124,9 @@ function SplitGrid({ cols, rows, selected, onToggle, leftTitle, rightTitle }) {
                 </td>
                 <td className="mono" title={r.key}>
                   {r.key}
+                </td>
+                <td className="muted" title={r.listTitle}>
+                  {r.listTitle}
                 </td>
                 <td className="num">
                   <span className="badge warn">{r.changedCount}</span>
@@ -215,6 +220,7 @@ export default function Compare({ diff, lastRead, onApplied }) {
   const cols = diff.changed[0]?.cells.map((c) => ({ field: c.field, label: c.label, title: c.excelHeader })) ?? [];
   const rows = diff.changed.map((r) => ({
     key: r.key,
+    listTitle: r.listTitle,
     changedCount: r.diffCells.length,
     cells: Object.fromEntries(
       r.cells.map((c) => [c.field, { left: c.beforeText, right: c.afterText, changed: c.changed }])
@@ -288,7 +294,11 @@ export default function Compare({ diff, lastRead, onApplied }) {
           <div className="row mt muted" style={{ fontSize: 13 }}>
             읽기 소요 — List {ms(lastRead.list.ms)}{' '}
             <span className="mono">
-              ({lastRead.list.count}건 · {lastRead.list.mode} · {lastRead.list.pages}페이지)
+              ({lastRead.list.count}건
+              {lastRead.list.perList?.length > 1
+                ? ' = ' + lastRead.list.perList.map((p) => `${p.title} ${p.count}`).join(' + ')
+                : ''}{' '}
+              · {lastRead.list.mode} · {lastRead.list.pages}페이지)
             </span>{' '}
             · Excel {lastRead.excel.method} {ms(lastRead.excel.ms)}{' '}
             <span className="mono">({lastRead.excel.rows.length}행)</span>
@@ -305,7 +315,7 @@ export default function Compare({ diff, lastRead, onApplied }) {
             ) : null}
             {w.dupListKeys.length > 0 ? (
               <div>
-                List 에 중복 키 {w.dupListKeys.length}건 (첫 항목만 대상):{' '}
+                List 에 중복 키 {w.dupListKeys.length}건 (리스트 간 중복 포함 · 첫 항목만 대상):{' '}
                 <span className="mono">{w.dupListKeys.slice(0, 5).join(', ')}</span>
               </div>
             ) : null}

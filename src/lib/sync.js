@@ -13,13 +13,18 @@ export async function applyChanges(changedRows, opts = {}) {
   const concurrency = Math.max(1, opts.concurrency ?? CONFIG.defaults.concurrency);
   const dryRun = !!opts.dryRun;
 
-  // 1건 = 아이템 1개의 fields PATCH (변경된 필드만 담는다)
-  const ops = changedRows.map((row) => ({
-    key: row.key,
-    itemId: row.itemId,
-    fields: Object.fromEntries(row.diffCells.map((c) => [c.field, c.writeValue])),
-    diffCells: row.diffCells,
-  }));
+  // 1건 = 아이템 1개의 fields PATCH (변경된 필드만 담는다).
+  // listId 는 비교 때 기록된 소속 리스트. 한 $batch 안에 서로 다른 리스트의 요청이 섞여도 된다.
+  const ops = changedRows.map((row) => {
+    if (!row.listId) throw new Error(`'${row.key}' 의 소속 리스트를 알 수 없습니다. 비교를 다시 실행하세요.`);
+    return {
+      key: row.key,
+      itemId: row.itemId,
+      listId: row.listId,
+      fields: Object.fromEntries(row.diffCells.map((c) => [c.field, c.writeValue])),
+      diffCells: row.diffCells,
+    };
+  });
 
   const batches = chunk(ops, batchSize);
   const batchTimings = [];
@@ -47,7 +52,7 @@ export async function applyChanges(changedRows, opts = {}) {
     const requests = batchOps.map((op, i) => ({
       id: `${bi}-${i}`,
       method: 'PATCH',
-      url: `/sites/${ctx.siteId}/lists/${ctx.listId}/items/${op.itemId}/fields`,
+      url: `/sites/${ctx.siteId}/lists/${op.listId}/items/${op.itemId}/fields`,
       headers: { 'if-match': '*' },
       body: op.fields,
     }));

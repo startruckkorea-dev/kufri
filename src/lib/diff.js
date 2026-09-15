@@ -102,7 +102,8 @@ export function buildDiff(excel, list, mapping) {
   const keyCol = colOf(mapping.keyList);
   const pairs = mapping.pairs.filter((p) => p.excel && p.list);
 
-  // 리스트를 키로 인덱싱 (중복 키 감지 포함)
+  // 리스트를 키로 인덱싱 (중복 키 감지 포함). 여러 리스트를 합친 상태이므로
+  // 같은 키가 두 리스트에 모두 있으면 여기서 중복으로 잡힌다 — 첫 리스트의 항목만 대상.
   const index = new Map();
   const dupListKeys = [];
   for (const item of list.items) {
@@ -154,7 +155,16 @@ export function buildDiff(excel, list, mapping) {
     }
 
     const diffCells = cells.filter((c) => c.changed);
-    const entry = { key: k, itemId: item.id, excelRow: row.__row, cells, diffCells };
+    // listId: 행이 원래 있던 리스트. 쓰기는 이 리스트로 간다 (행으로 나뉜 리스트 묶음)
+    const entry = {
+      key: k,
+      itemId: item.id,
+      listId: item.listId,
+      listTitle: item.listTitle,
+      excelRow: row.__row,
+      cells,
+      diffCells,
+    };
     if (diffCells.length) changed.push(entry);
     else unchanged.push(entry);
   }

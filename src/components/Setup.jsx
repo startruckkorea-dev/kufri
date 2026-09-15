@@ -50,7 +50,11 @@ export default function Setup({
           <dd>{CONFIG.hostname + CONFIG.sitePath}</dd>
           <dt>리스트</dt>
           <dd>
-            {CONFIG.listName} {schema ? <span className="badge ok">연결됨</span> : null}
+            {CONFIG.listNames.join(' + ')}{' '}
+            {schema ? <span className="badge ok">{schema.lists.length}개 연결됨</span> : null}
+            <div className="muted" style={{ fontFamily: 'inherit' }}>
+              행으로 나뉜 리스트를 합쳐 비교하고, 각 행은 원래 있던 리스트에 씁니다.
+            </div>
           </dd>
           <dt>파일 폴더</dt>
           <dd>Shared Documents/{CONFIG.fileFolder}</dd>
@@ -67,6 +71,12 @@ export default function Setup({
             )}
           </dd>
         </dl>
+        {schema?.columnMismatch?.length ? (
+          <div className="alert warn mt">
+            일부 리스트에만 있는 열은 매핑 대상에서 제외했습니다:{' '}
+            <span className="mono">{schema.columnMismatch.join(', ')}</span>
+          </div>
+        ) : null}
         <div className="row mt">
           <button className="btn primary" onClick={() => onConnect(null)} disabled={busy}>
             {schema ? '스키마 다시 읽기' : '연결 및 스키마 로드'}

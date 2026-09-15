@@ -67,7 +67,13 @@ export default function App() {
         await resolveAll();
         const wb = await readExcelViaWorkbook(targetSheet);
 
-        setSchema({ columns: ctx.columns, listTitle: ctx.listTitle, fileItem: ctx.fileItem });
+        setSchema({
+          columns: ctx.columns,
+          listTitle: ctx.listTitle,
+          lists: ctx.lists.map((l) => ({ name: l.name, title: l.title, columnCount: l.columns.length })),
+          columnMismatch: ctx.columnMismatch,
+          fileItem: ctx.fileItem,
+        });
         setSheets(wb.sheets);
         setSheet(wb.sheet);
         setExcelHeaders(wb.headers);

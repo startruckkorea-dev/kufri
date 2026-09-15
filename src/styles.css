@@ -174,7 +174,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 }
 .cmp-key {
   flex: none;
-  width: 250px;
+  width: 360px;
   max-height: 66vh;
   overflow-y: auto;
   overflow-x: hidden;
