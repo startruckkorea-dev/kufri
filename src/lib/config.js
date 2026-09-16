@@ -14,7 +14,7 @@ export const CONFIG = {
   sitePath: pick('VITE_SP_SITE_PATH', '/sites/STK-Kufri'),
   // 동기화 대상 리스트. 행으로 나뉜 리스트 여러 개를 하나의 대상으로 다룬다 (열 구성은 같아야 한다).
   // 한 행(키)은 이 중 한 리스트에만 있어야 하며, 쓰기는 그 행이 원래 있던 리스트로 간다.
-  listNames: pick('VITE_LIST_NAMES', 'logi_master_1,logi_master_2')
+  listNames: pick('VITE_LIST_NAMES', 'logi_master_1_3,logi_master_2')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
