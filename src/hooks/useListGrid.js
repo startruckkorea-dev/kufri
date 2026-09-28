@@ -22,8 +22,10 @@ export function useListGrid(run) {
   const load = useCallback(
     (force = false) =>
       run('리스트 읽는 중', async () => {
-        await resolveSite({ force });
-        await resolveLists({ force });
+        const t0 = performance.now();
+        if (force) await resolveSite({ force });
+        await resolveLists({ force }); // 로그인 직후 미리 해 두므로 보통 캐시 적중
+        const resolveMs = performance.now() - t0;
 
         // 열 순서·표시명 = GRID_COLUMNS. 내부명(list)으로 찾고, 없으면 표시명(label)으로 한 번 더.
         // 그래도 없는 열은 건너뛰고 이름을 남겨 화면에서 알린다.
@@ -51,6 +53,8 @@ export function useListGrid(run) {
           perList: list.perList,
           count: list.count,
           ms: list.ms,
+          resolveMs,
+          pages: list.pages,
           readAt: new Date(),
           missing,
         });
@@ -58,5 +62,20 @@ export function useListGrid(run) {
     [run]
   );
 
-  return { data, load };
+  /** 쓰기 성공한 항목의 필드만 메모리에서 갱신한다. 전체 재읽기 없음. updates: [{listId, id, fields}] */
+  const patchRows = useCallback((updates) => {
+    setData((d) => {
+      if (!d || !updates.length) return d;
+      const m = new Map(updates.map((u) => [`${u.listId}:${u.id}`, u.fields]));
+      return {
+        ...d,
+        rows: d.rows.map((r) => {
+          const f = m.get(`${r.listId}:${r.id}`);
+          return f ? { ...r, fields: { ...r.fields, ...f } } : r;
+        }),
+      };
+    });
+  }, []);
+
+  return { data, load, patchRows };
 }

@@ -70,6 +70,7 @@ export async function applyChanges(changedRows, opts = {}) {
       results.push({
         key: op.key,
         itemId: op.itemId,
+        listId: op.listId, // 리스트가 여러 개라 itemId 만으로는 항목을 특정할 수 없다
         status: r.status,
         ok,
         fields: op.fields,

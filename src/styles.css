@@ -345,8 +345,22 @@ table.dg thead th {
 table.dg thead th:hover { color: var(--accent); }
 table.dg thead th.extra { font-weight: 500; font-style: italic; }
 table.dg .stick1 { position: sticky; left: 0; z-index: 1; width: 44px; min-width: 44px; }
-table.dg .stick2 { position: sticky; left: 44px; z-index: 1; font-family: var(--mono); font-weight: 600; border-right: 2px solid var(--border); }
-table.dg thead .stick1, table.dg thead .stick2 { z-index: 3; background: var(--bg); }
+table.dg .stickc { position: sticky; left: 44px; z-index: 1; width: 34px; min-width: 34px; padding: 0 6px; text-align: center; cursor: default; }
+table.dg .stick2 { position: sticky; left: 78px; z-index: 1; font-family: var(--mono); font-weight: 600; border-right: 2px solid var(--border); }
+table.dg thead .stick1, table.dg thead .stickc, table.dg thead .stick2 { z-index: 3; background: var(--bg); }
 table.dg td.num, table.dg th.num { text-align: right; font-variant-numeric: tabular-nums; }
 table.dg tbody tr:hover td { background: var(--accent-soft); }
+table.dg tbody tr.sel td { background: var(--accent-soft); }
 table.dg td.empty { text-align: center; padding: 32px; }
+
+/* TEMP(쓰기 속도 측정) — 편집 가능 셀 */
+table.dg td.editable { cursor: text; }
+table.dg td.editable:hover { box-shadow: inset 0 0 0 1px var(--accent); }
+table.dg td.editing { padding: 0; }
+table.dg td.editing input {
+  width: 100%; height: 100%; box-sizing: border-box; margin: 0; padding: 0 8px;
+  font: inherit; border: 0; border-radius: 0; outline: 2px solid var(--accent); outline-offset: -2px;
+  background: var(--surface); color: var(--text);
+}
+.bench { border: 1px dashed var(--warn); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 12px; background: var(--warn-bg); }
+.bench .stats .stat { background: var(--surface); }

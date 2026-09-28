@@ -29,13 +29,14 @@ export const GRID_COLUMNS = [
   { label: 'Model', list: 'model' }, // 추정
   { label: 'Axle', list: 'axle' }, // 추정
   { label: 'Cab', list: 'cab' }, // 추정
-  { label: 'MY', list: 'my' }, // 추정
+  { label: 'MY', list: 'model_year' }, // 확인
   { label: 'Duty Class', list: 'duty_class' }, // 추정
   { label: 'Sub Cat', list: 'sub_cat' }, // 확인
   { label: 'Color Code', list: 'color' }, // 추정 — 대응표의 color(Lack 1)를 색상 코드로 봄
   { label: 'Color Name', list: 'color_name' }, // 추정
   { label: 'Gen.', list: 'gen' }, // 추정
   { label: 'VIN No.', list: 'vin_no' }, // 확인
+  { label: 'T/M', list: 'transmission' }, // 확인
   { label: 'Option', list: 'option' }, // 추정
   { label: 'Wheelbase', list: 'wheelbase' }, // 추정
   { label: 'PTO', list: 'pto' }, // 추정
@@ -53,7 +54,7 @@ export const GRID_COLUMNS = [
   { label: 'Shipping', list: 'shipping' }, // 확인
   { label: 'Invoice', list: 'invoice' }, // 확인
   { label: 'Planned Arrival', list: 'planned_arrival' }, // 확인
-  { label: 'ETA (TDD calc.+75)', list: 'eta' }, // 추정
+  { label: 'ETA (TDD calc.+75)', list: 'tdd_cal_eta' }, // 확인
   { label: 'ATA(unipass)', list: 'ata' }, // 추정
   { label: 'Customs Clearance Date', list: 'customs_clearance_date' }, // 추정
 ];

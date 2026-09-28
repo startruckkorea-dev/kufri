@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { redirectUri } from './lib/config.js';
 import { initAuth, login, logout } from './lib/auth.js';
 import { isKnownHash, useRoute } from './lib/router.js';
+import { resolveLists } from './lib/sources.js';
 import { useSyncFlow } from './hooks/useSyncFlow.js';
 import { useListGrid } from './hooks/useListGrid.js';
 import Shell from './components/Shell.jsx';
@@ -61,6 +62,12 @@ export default function App() {
 
   const sync = useSyncFlow(run);
   const grid = useListGrid(run);
+
+  // 로그인 직후 사이트·리스트·열 리졸브를 미리 해 둔다 (작은 호출 3회, 세션 캐시).
+  // 관리자 탭에 들어갈 때 항목 읽기만 남아 첫 화면이 빨라진다. 실패는 조용히 넘기고, 실제 읽기 때 다시 시도되어 오류가 표시된다.
+  useEffect(() => {
+    if (account) resolveLists().catch(() => {});
+  }, [account]);
 
   const handleLogin = () => {
     try {

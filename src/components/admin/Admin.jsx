@@ -13,7 +13,11 @@ export default function Admin({ sub, sync, grid, busy }) {
           </a>
         ))}
       </nav>
-      {sub === 'sync' ? <SyncView sync={sync} busy={busy} /> : <ListGrid data={grid.data} busy={busy} onRefresh={() => grid.load(true)} />}
+      {sub === 'sync' ? (
+        <SyncView sync={sync} busy={busy} />
+      ) : (
+        <ListGrid data={grid.data} busy={busy} onRefresh={() => grid.load(true)} onPatched={grid.patchRows} />
+      )}
     </>
   );
 }

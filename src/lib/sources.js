@@ -24,13 +24,17 @@ export async function resolveSite({ force = false } = {}) {
 }
 
 export async function resolveLists({ force = false } = {}) {
-  await resolveSite();
   if (ctx.lists.length && !force) return;
 
-  const lists = await gfetch(`/sites/${ctx.siteId}/lists?$select=id,name,displayName,webUrl`, {
-    name: 'resolve.lists',
-  });
+  // 사이트 리졸브와 리스트 나열을 경로 주소 지정으로 한 번에 한다 (왕복 1회 절약).
+  // siteId 는 리스트의 parentReference 에서 얻고, 없으면 별도로 리졸브한다.
+  const lists = await gfetch(
+    `/sites/${CONFIG.hostname}:${CONFIG.sitePath}:/lists?$select=id,name,displayName,parentReference`,
+    { name: 'resolve.lists' }
+  );
   const all = lists.value || [];
+  if (!ctx.siteId || force) ctx.siteId = all.find((l) => l.parentReference?.siteId)?.parentReference.siteId || null;
+  if (!ctx.siteId) await resolveSite({ force: true });
   const found = CONFIG.listNames.map((want) => all.find((l) => l.name === want || l.displayName === want) || null);
   const missing = CONFIG.listNames.filter((_, i) => !found[i]);
   if (missing.length) {
@@ -40,12 +44,16 @@ export async function resolveLists({ force = false } = {}) {
     );
   }
 
-  // 리스트마다 열을 읽는다. 순차 호출 — 리스트 수는 적고 부하를 평탄하게 유지한다
-  const resolved = [];
-  for (const l of found) {
-    const cols = await gfetch(`/sites/${ctx.siteId}/lists/${l.id}/columns`, { name: `resolve.columns:${l.name}` });
-    resolved.push({ id: l.id, name: l.name, title: l.displayName || l.name, columns: mapColumns(cols.value || []) });
-  }
+  // 리스트마다 열을 읽는다. 리스트 수(2~3개)만큼 동시 호출 — 읽기 전용이라 부하 영향은 미미하고 왕복이 줄어든다
+  const colsAll = await Promise.all(
+    found.map((l) => gfetch(`/sites/${ctx.siteId}/lists/${l.id}/columns`, { name: `resolve.columns:${l.name}` }))
+  );
+  const resolved = found.map((l, i) => ({
+    id: l.id,
+    name: l.name,
+    title: l.displayName || l.name,
+    columns: mapColumns(colsAll[i].value || []),
+  }));
   ctx.lists = resolved;
   ctx.listTitle = resolved.map((l) => l.title).join(' + ');
 
@@ -132,7 +140,9 @@ export const writableColumns = () =>
 
 /**
  * 대상 리스트 전체의 아이템을 합쳐 읽는다. 항목마다 소속 리스트(listId)를 붙여
- * 쓰기 때 원래 리스트로 돌아가게 한다. 리스트는 순차로 읽는다 (부하 평탄화).
+ * 쓰기 때 원래 리스트로 돌아가게 한다.
+ * 리스트는 동시에 읽는다 — 읽기는 RU 부담이 작고, 리스트 수(2~3개)만큼만 병렬이라 스로틀 여지가 거의 없다.
+ * 각 리스트 안의 페이지는 nextLink 를 따라 순차로 읽는다.
  * @param {string[]|null} fieldNames 지정 시 $select 로 필요한 필드만 (읽기 속도 최적화)
  */
 export async function readListItems(fieldNames = null) {
@@ -141,14 +151,21 @@ export async function readListItems(fieldNames = null) {
     ? `fields($select=${[...new Set(fieldNames)].join(',')})`
     : 'fields';
 
+  const results = await Promise.all(
+    ctx.lists.map((l) =>
+      gfetchAll(
+        `/sites/${ctx.siteId}/lists/${l.id}/items` +
+          `?$expand=${expand}&$select=id,lastModifiedDateTime&$top=${CONFIG.defaults.listPageSize}`,
+        { name: `read.list:${l.name}` }
+      )
+    )
+  );
+
   const items = [];
   const perList = [];
   let pages = 0;
-  for (const l of ctx.lists) {
-    const url =
-      `/sites/${ctx.siteId}/lists/${l.id}/items` +
-      `?$expand=${expand}&$select=id,lastModifiedDateTime&$top=${CONFIG.defaults.listPageSize}`;
-    const r = await gfetchAll(url, { name: `read.list:${l.name}` });
+  ctx.lists.forEach((l, i) => {
+    const r = results[i];
     for (const it of r.items) {
       items.push({
         id: it.id,
@@ -160,7 +177,7 @@ export async function readListItems(fieldNames = null) {
     }
     perList.push({ title: l.title, count: r.items.length, pages: r.pages });
     pages += r.pages;
-  }
+  });
   const ms = performance.now() - t0;
 
   return {
