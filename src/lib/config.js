@@ -18,7 +18,8 @@ export const CONFIG = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
-  fileFolder: pick('VITE_FILE_FOLDER', 'STK-Kufri_Data'),
+  // 문서 라이브러리 루트 기준 경로. 하위 폴더는 '/' 로 잇는다
+  fileFolder: pick('VITE_FILE_FOLDER', 'STK-Kufri_Data/read'),
   // 파일명 접두어. 정확히 같은 이름이 없으면 이 접두어로 시작하는 파일 중 가장 최근 수정본을 쓴다.
   fileBaseName: pick('VITE_FILE_BASENAME', 'SDISP'),
 
@@ -41,9 +42,9 @@ export const CONFIG = {
       { list: 'change', excel: 'Ä' },
       { list: 'changeability_date', excel: 'Änderbarkeitsdatum' },
       { list: 'actualpm', excel: 'LT-Quote' },
-      { list: 'disfatch', excel: 'Versand' },
       { list: 'tdd_cal', excel: 'GLT-Err.' },
       { list: 'tdd_actual', excel: 'GLT-Ist' },
+      { list: 'dispatch', excel: 'Versand' }, // columns.js 와 동일 (이전 'disfatch' 는 오타)      
       { list: 'shipping', excel: 'Abgangsdatum' },
       { list: 'invoice', excel: 'Rg.-Datum' },
       { list: 'planned_arrival', excel: 'Gepl. Ankunftsdatum' },

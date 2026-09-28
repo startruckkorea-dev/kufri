@@ -1,6 +1,7 @@
 // 비교 엔진 — Excel(원본) 기준으로 SharePoint 리스트와의 차이를 찾는다.
 // 동기화 범위: "값이 다른 항목만 갱신" (신규 추가/삭제 없음)
 import { ctx } from './sources.js';
+import { labelFor } from './columns.js';
 
 const EXCEL_EPOCH = Date.UTC(1899, 11, 30); // 1900 날짜체계 (Excel 의 1900 윤년 버그 보정 포함)
 
@@ -142,7 +143,7 @@ export function buildDiff(excel, list, mapping) {
       const na = normalize(after, col);
       cells.push({
         field: p.list,
-        label: col.displayName || p.list,
+        label: labelFor(p.list) || col.displayName || p.list, // 화면 표시명은 columns.js 와 통일
         excelHeader: p.excel,
         type: col.type,
         before,
@@ -245,6 +246,14 @@ export function autoMap(excelHeaders, columns, exclude = {}) {
   return pairs;
 }
 
+/** 열 이름(내부명 또는 표시명)으로 열 정의를 찾는다. 정확 일치 → 정규화 일치 순. 없으면 null */
+export function findColumn(columns, want) {
+  const exact = columns.find((c) => c.name === want || c.displayName === want);
+  if (exact) return exact;
+  const k = nameKey(want);
+  return k ? columns.find((c) => nameKey(c.name) === k || nameKey(c.displayName) === k) || null : null;
+}
+
 /**
  * 고정 대응표(CONFIG.mapping)를 실제 열 이름으로 해석한다.
  * list 쪽은 내부명/표시명 정확 일치 → 정규화 일치, excel 쪽은 헤더 정확 일치 → 정규화 일치 순.
@@ -254,12 +263,7 @@ export function autoMap(excelHeaders, columns, exclude = {}) {
  * @returns {{ ok:boolean, mapping:{keyExcel,keyList,pairs}, missing:{list:string[],excel:string[]}, readOnly:string[], rows:Array }}
  */
 export function resolveMapping(spec, excelHeaders, columns) {
-  const findCol = (want) => {
-    const exact = columns.find((c) => c.name === want || c.displayName === want);
-    if (exact) return exact;
-    const k = nameKey(want);
-    return k ? columns.find((c) => nameKey(c.name) === k || nameKey(c.displayName) === k) || null : null;
-  };
+  const findCol = (want) => findColumn(columns, want);
   const findHeader = (want) => {
     const exact = excelHeaders.find((h) => h === want);
     if (exact) return exact;

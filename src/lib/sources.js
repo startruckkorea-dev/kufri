@@ -1,4 +1,4 @@
-// 데이터 소스 계층 — SharePoint 리스트 읽기 / Excel 파일 읽기(2가지 방식)
+// 데이터 소스 계층 — SharePoint 리스트 읽기 / Excel 파일 읽기
 import { CONFIG } from './config.js';
 import { gfetch, gfetchAll } from './graph.js';
 
@@ -14,12 +14,18 @@ export const ctx = {
 };
 
 // ---------------------------------------------------------------- 리졸브
+// 사이트 → 리스트 → 파일 세 단계. 화면마다 필요한 만큼만 부른다
+// (전체 데이터 그리드는 파일이 필요 없다). 결과는 세션 동안 캐시하고 force 로 다시 읽는다.
 
-export async function resolveAll() {
-  const t0 = performance.now();
-
+export async function resolveSite({ force = false } = {}) {
+  if (ctx.siteId && !force) return;
   const site = await gfetch(`/sites/${CONFIG.hostname}:${CONFIG.sitePath}`, { name: 'resolve.site' });
   ctx.siteId = site.id;
+}
+
+export async function resolveLists({ force = false } = {}) {
+  await resolveSite();
+  if (ctx.lists.length && !force) return;
 
   const lists = await gfetch(`/sites/${ctx.siteId}/lists?$select=id,name,displayName,webUrl`, {
     name: 'resolve.lists',
@@ -35,20 +41,26 @@ export async function resolveAll() {
   }
 
   // 리스트마다 열을 읽는다. 순차 호출 — 리스트 수는 적고 부하를 평탄하게 유지한다
-  ctx.lists = [];
+  const resolved = [];
   for (const l of found) {
     const cols = await gfetch(`/sites/${ctx.siteId}/lists/${l.id}/columns`, { name: `resolve.columns:${l.name}` });
-    ctx.lists.push({ id: l.id, name: l.name, title: l.displayName || l.name, columns: mapColumns(cols.value || []) });
+    resolved.push({ id: l.id, name: l.name, title: l.displayName || l.name, columns: mapColumns(cols.value || []) });
   }
-  ctx.listTitle = ctx.lists.map((l) => l.title).join(' + ');
+  ctx.lists = resolved;
+  ctx.listTitle = resolved.map((l) => l.title).join(' + ');
 
   // 매핑 대상은 모든 리스트에 공통인 열만. 일부에만 있는 열은 이름을 남겨 화면에서 알린다.
-  const [first, ...rest] = ctx.lists;
+  const [first, ...rest] = resolved;
   ctx.columns = first.columns.filter((c) => rest.every((l) => l.columns.some((o) => o.name === c.name)));
   const common = new Set(ctx.columns.map((c) => c.name));
   ctx.columnMismatch = [
-    ...new Set(ctx.lists.flatMap((l) => l.columns.map((c) => c.name)).filter((n) => !common.has(n))),
+    ...new Set(resolved.flatMap((l) => l.columns.map((c) => c.name)).filter((n) => !common.has(n))),
   ];
+}
+
+export async function resolveFile({ force = false } = {}) {
+  await resolveSite();
+  if (ctx.fileItem && !force) return;
 
   const drive = await gfetch(`/sites/${ctx.siteId}/drive?$select=id,name,webUrl`, { name: 'resolve.drive' });
   ctx.driveId = drive.id;
@@ -70,11 +82,18 @@ export async function resolveAll() {
   if (!file) {
     throw new Error(
       `'${CONFIG.fileFolder}' 폴더에서 '${CONFIG.fileBaseName}' 파일을 찾지 못했습니다. ` +
-        `폴더 내 파일: ${(children.value || []).map((f) => f.name).join(', ')}`
+        `폴더 내 파일: ${files.map((f) => f.name).join(', ')}`
     );
   }
   ctx.fileItem = file;
+}
 
+/** 동기화 화면용: 사이트·리스트·파일 전부 */
+export async function resolveAll({ force = false } = {}) {
+  const t0 = performance.now();
+  await resolveSite({ force });
+  await resolveLists({ force });
+  await resolveFile({ force });
   return { ...ctx, resolveMs: performance.now() - t0 };
 }
 
@@ -154,7 +173,7 @@ export async function readListItems(fieldNames = null) {
   };
 }
 
-// ---------------------------------------------------------------- Excel 읽기 A: Workbook API
+// ---------------------------------------------------------------- Excel 읽기: Workbook API
 
 /**
  * Graph Workbook API 로 시트를 읽는다. 파일 다운로드 없음.

@@ -208,7 +208,7 @@ export default function Compare({ diff, lastRead, onApplied }) {
     return (
       <div className="card">
         <div className="empty">
-          먼저 <b>① 연결 · 매핑</b> 에서 비교를 실행하세요.
+          먼저 <b>① 연결 · 대응표</b> 에서 비교를 실행하세요.
         </div>
       </div>
     );

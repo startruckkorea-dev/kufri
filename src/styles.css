@@ -56,9 +56,64 @@ header.app {
   top: 0;
   z-index: 10;
 }
-header.app h1 { font-size: 16px; margin: 0; font-weight: 650; }
+header.app .brand { font-size: 16px; font-weight: 650; color: var(--text); text-decoration: none; letter-spacing: .02em; }
 header.app .spacer { flex: 1; }
 header.app .who { color: var(--muted); font-size: 13px; }
+
+/* ── 셸: 상단바 + 좌측 사이드바 + 콘텐츠 ── */
+.shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  min-height: 100vh;
+}
+.shell > header.app { grid-column: 1 / -1; }
+
+nav.side {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 8px;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  position: sticky;
+  top: 49px;
+  height: calc(100vh - 49px);
+  overflow-y: auto;
+}
+nav.side a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 6px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+nav.side a:hover { background: var(--bg); }
+nav.side a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+nav.side a .n { color: var(--muted); font-variant-numeric: tabular-nums; width: 16px; text-align: right; font-size: 12px; }
+nav.side a[aria-current="page"] .n { color: var(--accent); }
+nav.side a.admin { margin-top: auto; border-top: 1px solid var(--border); border-radius: 0; padding-top: 14px; }
+
+main { grid-column: 2; padding: 20px; min-width: 0; }
+
+@media (max-width: 900px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  nav.side {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 6px 8px;
+  }
+  nav.side a.admin { margin-top: 0; margin-left: auto; border-top: 0; padding-top: 9px; }
+  main { grid-column: 1; }
+}
 
 nav.tabs {
   display: flex;
@@ -68,7 +123,8 @@ nav.tabs {
   border-bottom: 1px solid var(--border);
   overflow-x: auto;
 }
-nav.tabs button {
+nav.tabs.sub { margin: -20px -20px 16px; }
+nav.tabs button, nav.tabs a {
   border: 0;
   background: none;
   padding: 10px 14px;
@@ -77,11 +133,10 @@ nav.tabs button {
   cursor: pointer;
   border-bottom: 2px solid transparent;
   white-space: nowrap;
+  text-decoration: none;
 }
-nav.tabs button[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+nav.tabs button[aria-selected="true"], nav.tabs a[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 nav.tabs button:disabled { opacity: .4; cursor: not-allowed; }
-
-main { padding: 20px; max-width: 1400px; margin: 0 auto; }
 
 .card {
   background: var(--surface);
@@ -255,3 +310,43 @@ progress { width: 260px; height: 8px; }
 
 .log-line { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .log-line .t { color: var(--accent); }
+
+/* ── 전체 데이터 그리드 (관리자 탭) — 행번호·키 열 고정, 헤더 고정 ── */
+.dg-toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 10px; font-size: 13px; }
+.dg-wrap {
+  overflow: auto;
+  max-height: calc(100vh - 230px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+table.dg { border-collapse: separate; border-spacing: 0; font-size: 12.5px; min-width: 100%; width: max-content; }
+table.dg th, table.dg td {
+  height: 28px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  white-space: nowrap;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: var(--surface);
+}
+table.dg thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
+  color: var(--muted);
+  font-weight: 600;
+  cursor: pointer;
+  user-select: none;
+}
+table.dg thead th:hover { color: var(--accent); }
+table.dg thead th.extra { font-weight: 500; font-style: italic; }
+table.dg .stick1 { position: sticky; left: 0; z-index: 1; width: 44px; min-width: 44px; }
+table.dg .stick2 { position: sticky; left: 44px; z-index: 1; font-family: var(--mono); font-weight: 600; border-right: 2px solid var(--border); }
+table.dg thead .stick1, table.dg thead .stick2 { z-index: 3; background: var(--bg); }
+table.dg td.num, table.dg th.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.dg tbody tr:hover td { background: var(--accent-soft); }
+table.dg td.empty { text-align: center; padding: 32px; }
