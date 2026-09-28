@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { display, toDate } from '../../lib/diff.js';
+import { display, findColumn, toDate } from '../../lib/diff.js';
 import { BENCH_FIELD, WritePanel, isWritable, useWriteBench } from './WriteBench.jsx'; // TEMP(쓰기 속도 측정)
 
 const ms = (v) => (v == null ? '—' : v >= 1000 ? `${(v / 1000).toFixed(2)} s` : `${Math.round(v)} ms`);
@@ -55,7 +55,8 @@ export default function ListGrid({ data, busy, onRefresh, onPatched }) {
   const lastClick = useRef(null); // TEMP: Shift 범위 선택 기준 (표시 순서 인덱스)
 
   const cols = data?.columns ?? [];
-  const benchCol = cols.find((c) => c.name === BENCH_FIELD) ?? null; // TEMP
+  // TEMP: 내부명은 대소문자가 다를 수 있어(예: Series) 열 정의와 같은 정규화 찾기를 쓴다
+  const benchCol = cols.length ? findColumn(cols, BENCH_FIELD) : null;
   const keyCol = cols.find((c) => c.isKey) ?? null;
   const bench = useWriteBench({ column: benchCol, keyColumn: keyCol, onPatched }); // TEMP
   const editable = isWritable(benchCol); // TEMP
@@ -190,7 +191,7 @@ export default function ListGrid({ data, busy, onRefresh, onPatched }) {
                 >
                   {c.label || c.displayName || c.name}
                   {sort?.field === c.name ? <span className="muted">{sort.dir === 1 ? ' ▲' : ' ▼'}</span> : null}
-                  {editable && c.name === BENCH_FIELD ? <span className="badge warn" style={{ marginLeft: 6 }}>편집</span> : null}
+                  {editable && c.name === benchCol.name ? <span className="badge warn" style={{ marginLeft: 6 }}>편집</span> : null}
                 </th>
               ))}
               <th title="행이 있는 리스트">리스트</th>
@@ -218,7 +219,7 @@ export default function ListGrid({ data, busy, onRefresh, onPatched }) {
                 </td>
                 {r.cells.map((t, ci) => {
                   const c = cols[ci];
-                  const isBench = editable && c.name === BENCH_FIELD; // TEMP
+                  const isBench = editable && c.name === benchCol.name; // TEMP
                   if (isBench && editing === r.key) {
                     return (
                       <td key={c.name} className={`${colClass(c, ci)} editing`}>
